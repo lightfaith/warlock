@@ -50,12 +50,12 @@ def chunks(data, size):
 
 def normalize_datetime(time=None):
     if not time:
-        return datetime.now().astimezone(get_localzone())
+        return datetime.now()
     if type(time) == str:
         variant = 0
         while True:
             try:
-                return dateutil_parse(time).astimezone(get_localzone())
+                return dateutil_parse(time).replace(tzinfo=None)
             except ValueError:
                 variant += 1
                 if variant == 1: # apache-access format
@@ -64,14 +64,13 @@ def normalize_datetime(time=None):
                     log.err('  Cannot unify datetime:', time)
                     return None
     elif type(time) == datetime:
-        return time.astimzeone(get_localzone())
+        return time.replace(tzinfo=None)
     elif type(time) in (int, float):
         # probably UNIX timestamp
-        return datetime.utcfromtimestamp(time).astimezone(get_localzone())
+        return datetime.fromtimestamp(time)
     else:
         log.err('  Unknown time type:', time, type(time))
         return None
-
 
 def natural_sort(data):
     return sorted(data, key=lambda x: [int(s) if s.isdigit() else s 

@@ -50,8 +50,8 @@ class Message:
                     # other as attributes
                     if attribute == 'timestamp':
                         self.timestamp = reformatter(value)
-                        if self.timestamp > lib.normalize_datetime(): # TODO mtime, subtracted...
-                            self.timestamp += relativedelta(years=-1)
+                        #if self.timestamp > lib.normalize_datetime(): # TODO mtime, subtracted...
+                        #    self.timestamp += relativedelta(years=-1)
                         if Message.debug_parsing:
                             log.info('  Added timestamp: %s' % self.timestamp)
                     else:
@@ -97,8 +97,8 @@ class Message:
 
         return '%s%s < %d > %s (from %s): \n%s\n%s\n%s\n    attr: %s%s' % (
             lib.severity_colors[self.severity],
-            #lib.normalize_datetime(self.timestamp),
-            self.timestamp,
+            lib.normalize_datetime(self.timestamp),
+            #self.timestamp,
             self.score,
             self.category,
             self.source,

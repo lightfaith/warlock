@@ -3,6 +3,11 @@ import re
 from source import lib
 from source import log
 
+from collections import OrderedDict
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+import matplotlib.ticker as ticker
+
 def list_events(events, display_filter_str, start, end):
     display_filter = Filter.parse(display_filter_str)
     for event in events:
@@ -87,6 +92,45 @@ def list_overview(events, what, display_filter_str, start, end):
                         for st in severity_totals), 
               '\u2502 %d' % sum(severity_totals))
         
+
+def plot(events, display_filter_str, start, end):
+    display_filter = Filter.parse(display_filter_str)
+
+    severities = ('UNKNOWN', 'none', 'info', 'notice', 'warning', 'critical')
+
+    to_show = [event for event in events 
+               if start <= event.timestamp <= end 
+               and (not display_filter or display_filter.test(event))]
+    if to_show:
+        log.info('Will plot %d events.' % len(to_show))
+    else:
+        log.warn('No events match criteria.')
+        return
+
+    # use events to get actual start and end
+    start = to_show[0].timestamp
+    end = to_show[-1].timestamp
+    print('Start:', start)
+    print('End:', end)
+
+    # TODO fix ticks
+    fig, ax = plt.subplots(1, 1, figsize=(10, 30))
+    plt.xticks(rotation=30)
+    by_severity = OrderedDict([(s, []) for s in severities])
+    for event in to_show:
+        by_severity[event.severity].append(event.timestamp)
+
+    ax.hist([mdates.date2num(by_severity[s]) for s in severities], 
+            bins=50, stacked=True, 
+            color=('darkgrey', 'lightgrey', 'yellowgreen', 'gold', 'orange', 'crimson'),
+            label=severities)
+    locator = mdates.AutoDateLocator()
+    ax.xaxis.set_major_locator(locator)
+    #ax.xaxis.set_major_locator(ticker.MultipleLocator(10))
+    ax.xaxis.set_major_formatter(mdates.AutoDateFormatter(locator))
+    plt.legend()
+    plt.show()
+
 
 class Filter:
     debug_filter = False
