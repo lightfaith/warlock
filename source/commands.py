@@ -2,11 +2,14 @@
 import re
 from source import lib
 from source import log
+import traceback
 
 from collections import OrderedDict
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import matplotlib.ticker as ticker
+
+from source.parser import Message
 
 def list_events(events, display_filter_str, start, end):
     display_filter = Filter.parse(display_filter_str)
@@ -15,6 +18,35 @@ def list_events(events, display_filter_str, start, end):
             continue
         if (not display_filter) or display_filter.test(event):
             print(event)
+
+
+def list_suspicious(events, what, display_filter_str, start, end):
+    display_filter = Filter.parse(display_filter_str)
+
+    severities = ('UNKNOWN', 'none', 'info', 'notice', 'warning', 'critical')
+
+    if what in Message.suspicious.keys():
+        problems = lib.natural_sort(Message.suspicious[what].items(), key = lambda x: x[0])
+        for troublemaker, incidents in problems:
+            try:
+                incident_count = max(count for _,count in incidents.items()) # TODO or sum
+                if incident_count > 5:
+                    suspicious_color = log.COLOR_RED
+                elif incident_count > 2:
+                    suspicious_color = log.COLOR_BROWN
+                else:
+                    suspicious_color = log.COLOR_YELLOW
+            except:
+                #traceback.print_exc()
+                incidents = None
+                suspicious_color = log.COLOR_NONE
+
+            print('%s%s%s' % (suspicious_color, troublemaker, log.COLOR_NONE))
+            if incidents:
+                for incident, count in incidents.items():
+                    print('- %s (%d)' % (incident, count))
+        print('\u2500' * 15)
+        print('TOTAL:',len(problems))
 
 
 def list_overview(events, what, display_filter_str, start, end):
@@ -73,14 +105,31 @@ def list_overview(events, what, display_filter_str, start, end):
         # add counters to severity totals
         for i in range(len(counters)):
             severity_totals[i] += counters[i]
+        
+        # set color if suspicious
+        try:
+            incidents = Message.suspicious[what][parameter]
+            if max(count for _,count in incidents.items()) >= 3:  # TODO or sum?
+                suspicious_color = log.COLOR_RED
+            else:
+                suspicious_color = log.COLOR_YELLOW
+        except:
+            #traceback.print_exc()
+            incidents = None
+            suspicious_color = log.COLOR_NONE
             
-        # TODO mark if suspicious
-        print('%-*s' % (param_max_len, parameter), 
+        print('%s%-*s%s' % (suspicious_color, 
+                            param_max_len, 
+                            parameter, 
+                            log.COLOR_NONE), 
               '  '.join('%s%8s%s' % (log.COLOR_NONE, 
                                        str(c or '.'), 
                                        log.COLOR_NONE) 
                         for c in counters), 
               '\u2502 %d' % sum(counters))
+        if incidents:
+            for incident_type, count in incidents.items():
+                print(' - %s (%d)' % (incident_type, count))
     
     # also print severity totals
     if what != 'attributes':
@@ -107,14 +156,15 @@ def plot(events, display_filter_str, start, end):
         log.warn('No events match criteria.')
         return
 
-    # use events to get actual start and end
-    start = to_show[0].timestamp
-    end = to_show[-1].timestamp
-    print('Start:', start)
-    print('End:', end)
+    ## use events to get actual start and end
+    #start = to_show[0].timestamp
+    #end = to_show[-1].timestamp
+    #print('Start:', start)
+    #print('End:', end)
 
     # TODO fix ticks
-    fig, ax = plt.subplots(1, 1, figsize=(10, 30))
+    #plt.style.use('dark_background')
+    fig, ax = plt.subplots(1, 1, figsize=(8, 20))
     plt.xticks(rotation=30)
     by_severity = OrderedDict([(s, []) for s in severities])
     for event in to_show:

@@ -21,8 +21,12 @@ class MessageParserThread(Thread):
         #print(self, 'done.')
 
 
+
+
+
 class Message:
     debug_parsing = False
+    suspicious = {}
 
     def __init__(self, source, category, message, grok_pattern, parsed):
         self.source = source      # filename
@@ -60,21 +64,55 @@ class Message:
                                      % (key, value, attribute))
                         self.attributes[attribute] = reformatter(value)
 
+
         if self.category == 'kernel':
             self.attributes['service'] = 'kernel'
 
-        # TODO set score
         if self.category == 'sudo':
-            # TODO mark failing users as suspicious
             if 'error' in self.attributes.keys():
+                self.score = 9
+                Message.mark_suspicious(self, 'sudo failed')
+            else:
+                self.score = 3
+
+        elif self.category == 'su':
+            if self.attributes['result'] == 'FAILED': 
+                self.score = 9
+                Message.mark_suspicious(self, 'su failed')
+            else:
+                self.score = 3
+            del self.attributes['result']
+
+        elif self.category in ('groupadd', 'useradd',):
+            self.score = 4
+
+        elif self.category in ('auth',):
+            if 'result' in self.attributes.keys():
+                if self.attributes['result'] == 'Failed': 
+                    self.score = 9
+                    Message.mark_suspicious(self, '\'SSH\' auth failed')
+                else:
+                    self.score = 2
+                del self.attributes['result']
+            elif 'error' in self.attributes.keys():
                 self.score = 9
             else:
                 self.score = 2
-        elif self.category in ('groupadd', 'useradd',):
-            self.score = 4
-        elif self.category in ('auth',):
-            self.score = 2
+                # TODO fail with login
 
+        elif self.category == 'kernel':
+            if 'entered promiscuous mode' in self.message:
+                self.score = 4
+            elif 'segfault at ' in self.message:
+                self.score = 7
+
+        elif self.category == 'daemon':
+            if self.attributes['service'] == 'login':
+                if re.search(r'(A|a)uthentication failure', self.message):
+                    self.score == 8
+                    Message.mark_suspicious(self, '\'login\' auth failed')
+
+        #
         # set severity based on score
         if self.score >= 8:
             self.severity = 'critical'
@@ -89,7 +127,7 @@ class Message:
         else:
             self.severity = 'none'
             
-        
+    
     
     #################################################
     def __str__(self):
@@ -109,6 +147,21 @@ class Message:
             log.COLOR_NONE)
 
     ######################################################################
+    @staticmethod
+    def mark_suspicious(event, reason):
+        for attribute in ('ip', 'user'):
+            if attribute not in Message.suspicious.keys():
+                Message.suspicious[attribute] = {}
+            value = event.attributes.get(attribute)
+            if value:
+                if value not in Message.suspicious[attribute].keys():
+                    Message.suspicious[attribute][value] = {}
+                try:
+                    Message.suspicious[attribute][value][reason] += 1
+                except:
+                    Message.suspicious[attribute][value][reason] = 1
+    
+
     @staticmethod
     def parse(source, message):
         # define interval (TODO from source)
@@ -143,6 +196,7 @@ class Message:
     attributes = [
         ('timestamp', lambda x: lib.normalize_datetime(x), ('timestamp', 'time')),
         ('ip', lambda x: x, ('clientip', 'ip')),
+        ('port', lambda x: x, ('port',)),
         ('pid', lambda x: int(x), ('pid',)),
         ('host', lambda x: x, ('host', 'hostname',)),
         ('user', lambda x: x, ('user', 'username')),
@@ -150,6 +204,7 @@ class Message:
         ('command', lambda x: x, ('command',)),
         ('error', lambda x: x, ('error',)),
         ('service', lambda x: x, ('service',)),
+        ('result', lambda x: x, ('result',)),
     ]
 
     # patterns
@@ -159,17 +214,36 @@ class Message:
         ('apache-access', '^%{COMBINEDAPACHELOG}$', lambda source: re.search(r'access\.log(\.\d)?$', source)),
         ('apache-error', '^%{HTTPD_ERRORLOG}$', lambda source: re.search(r'error\.log(\.\d)?$', source)),
 
+        # auth with SSH key or password
         ('auth', 
-         '%{SYSLOGTIMESTAMP:timestamp} %{SYSLOGHOST:hostname} sshd(?:\\[%{POSINT:pid}\\])?: %{DATA:event} %{DATA:method} for (invalid user )?%{DATA:user} from %{IPORHOST:ip} port %{NUMBER:port} ssh2(: %{GREEDYDATA:signature})?', 
+         '%{SYSLOGTIMESTAMP:timestamp} %{SYSLOGHOST:hostname} sshd(?:\\[%{POSINT:pid}\\])?: %{DATA:result} %{DATA:method} for (invalid user )?%{DATA:user} from %{IPORHOST:ip} port %{NUMBER:port} ssh2(: %{GREEDYDATA:signature})?', 
          lambda source: re.search(r'auth\.log(\.\d)?$', source)),
+        # auth through login 
+        ('auth', 
+         '%{SYSLOGTIMESTAMP:timestamp} %{SYSLOGHOST:hostname} login(?:\\[%{POSINT:pid}\\])?: pam_unix%{GREEDYDATA}: %{DATA:event}; %{GREEDYDATA} user=%{GREEDYDATA:user}',
+         lambda source: re.search(r'auth\.log(\.\d)?$', source)),
+        # sshd reverse mapping fail
+        ('auth', 
+         '%{SYSLOGTIMESTAMP:timestamp} %{SYSLOGHOST:hostname} sshd(?:\\[%{POSINT:pid}\\])?: reverse mapping checking getaddrinfo for %{GREEDYDATA} \\[%{IPORHOST:ip}\\] failed - %{GREEDYDATA:error}',
+         lambda source: re.search(r'auth\.log(\.\d)?$', source)),
+        # sudo
         ('sudo', 
          "%{SYSLOGTIMESTAMP:timestamp} %{SYSLOGHOST:hostname} sudo(?:\\[%{POSINT:pid}\\])?: \\s*%{DATA:user} :( %{DATA:error} ;)? TTY=%{DATA:tty} ; PWD=%{DATA:pwd} ; USER=%{DATA:sudouser} ; COMMAND=%{GREEDYDATA:command}", 
          lambda source: re.search(r'auth\.log(\.\d)?$', source)),
+        # su
+        ('su', 
+         '%{SYSLOGTIMESTAMP:timestamp} %{SYSLOGHOST:hostname} su(?:\\[%{POSINT:pid}\\])?: %{GREEDYDATA:result} su for %{DATA:sudouser} by %{GREEDYDATA:user}',
+         lambda source: re.search(r'auth\.log(\.\d)?$', source)),
+
+        # user modification
         ('useradd', 
-         '%{SYSLOGTIMESTAMP:timestamp} %{SYSLOGHOST:hostname} useradd(?:\\[%{POSINT:pid}\\])?: new user: name=%{DATA:name}, UID=%{NUMBER:uid}, GID=%{NUMBER:gid}, home=%{DATA:home}, shell=%{DATA:shell}$', 
+         '%{SYSLOGTIMESTAMP:timestamp} %{SYSLOGHOST:hostname} useradd(?:\\[%{POSINT:pid}\\])?: new user: name=%{DATA:user}, UID=%{NUMBER:uid}, GID=%{NUMBER:gid}, home=%{DATA:home}, shell=%{DATA:shell}$', 
          lambda source: re.search(r'auth\.log(\.\d)?$', source)),
         ('groupadd', 
-         '%{SYSLOGTIMESTAMP:timestamp} %{SYSLOGHOST:hostname} groupadd(?:\\[%{POSINT:pid}\\])?: new group: name=%{DATA:name}, GID=%{NUMBER:gid}', 
+         '%{SYSLOGTIMESTAMP:timestamp} %{SYSLOGHOST:hostname} groupadd(?:\\[%{POSINT:pid}\\])?: new group: name=%{DATA:group}, GID=%{NUMBER:gid}', 
+         lambda source: re.search(r'auth\.log(\.\d)?$', source)),
+        ('chsh', 
+         '%{SYSLOGTIMESTAMP:timestamp} %{SYSLOGHOST:hostname} chsh(?:\\[%{POSINT:pid}\\])?: changed user `%{DATA:user}\' shell to `%{DATA:shell}\'',
          lambda source: re.search(r'auth\.log(\.\d)?$', source)),
         
         ('kernel', 
@@ -178,6 +252,7 @@ class Message:
         ('kernel', 
          '', 
          lambda source: re.search(r'dmesg(\.\d)?$', source)),
+
         ('tor', 
          '%{SYSLOGTIMESTAMP:timestamp}', 
          lambda source: re.search(r'tor/debug\.log(\.\d)?$', source)),

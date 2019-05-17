@@ -107,7 +107,7 @@ if not timed_events:
 
 start = timed_events[0].timestamp
 end = timed_events[-1].timestamp
-log.info('Events span from %s to %s.' % (start, end))
+log.info('Found %d events from %s to %s.' % (len(events), start, end))
 
 
 """
@@ -122,16 +122,18 @@ while True:
         lib.exit_program(None, None)
     if len(cmd) == 0:
         continue
+
     # quit?
     if lib.quit_string(cmd):
         log.warn('Do you really want to quit? ', new_line=False)
         if lib.positive(input()):
             lib.exit_program(None, None)
         continue
-    # do command
+
     # test
     if cmd.startswith('test'):
-        print(Filter.parse(cmd[4:]))
+        print(Message.suspicious.keys())
+        print(Message.suspicious.get('ip'))
 
     # set start
     elif cmd.startswith('start '):
@@ -156,21 +158,30 @@ while True:
         """
         log.info('Showing events from %s to %s.' % (start, end))
         list_events(events, cmd[11:], start, end)
+
+    # list suspicious
+    elif cmd.startswith('suspicious'):
+        try:
+            log.info('Showing suspicious for events from %s to %s.' % (start, end))
+
+            list_suspicious(events, cmd.split()[1], ' '.join(cmd.split()[2:]),
+                          start, end)
+        except:
+            traceback.print_exc()
+            log.err('Usage: suspicious ip|user [<filter>]')
+    
     # list X
     elif cmd.startswith('list'):
         try:
             log.info('Showing counts for events from %s to %s.' % (start, end))
-            #if cmd in ('list time', 'list timestamp'):
-            #    log.info('First event:', start)
 
             list_overview(events, cmd.split()[1], ' '.join(cmd.split()[2:]),
                           start, end)
 
-            #if cmd in ('list time', 'list timestamp'):
-            #    log.info('Last event:', end)
         except:
             traceback.print_exc()
-            log.info('Usage: list events|source|category|<attribute> [<filter>]')
+            log.err('Usage: list events|source|category|<attribute> [<filter>]')
+   
     # plot
     elif cmd.startswith('plot'):
         plot(events, cmd[4:], start, end)

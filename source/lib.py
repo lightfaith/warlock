@@ -72,9 +72,9 @@ def normalize_datetime(time=None):
         log.err('  Unknown time type:', time, type(time))
         return None
 
-def natural_sort(data):
+def natural_sort(data, key=lambda x: x):
     return sorted(data, key=lambda x: [int(s) if s.isdigit() else s 
-                                       for s in re.split(r'(\d+)', str(x))])
+                                       for s in re.split(r'(\d+)', str(key(x)))])
 
 def find_between(data, startbytes, endbytes, startpos=0, endpos=0, inner=False):
     """
