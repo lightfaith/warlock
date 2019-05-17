@@ -1,0 +1,172 @@
+#!/usr/bin/python3
+
+import os
+import sys
+import readline
+import traceback
+#from datetime import datetime
+#from tzlocal import get_localzone
+
+from source import lib
+from source import log
+from source.parser import MessageParserThread, Message
+from source.commands import *
+
+try:
+    path = sys.argv[1]
+except:
+    log.err('Usage: %s <path>' % sys.argv[0])
+    sys.exit(1)
+
+
+"""
+load data
+"""
+logs = {}
+
+if os.path.isfile(path):
+    #log.info('Dealing with file.')
+    try:
+        with open(path, 'r') as f:
+            logs[path] = f.read().splitlines()
+    except UnicodeDecodeError:
+        log.err('%s is binary.' % path)
+
+elif os.path.isdir(path):
+    #log.info('Dealing with path.')
+    for root, ds, fs in os.walk(path):
+        for f in fs:
+            filepath = os.path.join(root, f)
+            try:
+                with open(filepath, 'r') as f:
+                    logs[filepath] = f.read().splitlines()
+            except UnicodeDecodeError:
+                log.err('%s is binary.' % filepath)
+
+"""
+parse events
+"""
+
+events = []
+for filename, lines in logs.items():
+    file_events = []
+    log.info(filename)
+    # skip /var/log/messages (non-critical stuff there)
+    #      /var/log/debug.log (non-critical stuff there)
+    if any([
+        re.search(r'messages(\.\d)?$', filename),
+        re.search(r'debug(\.log)?(\.\d)?$', filename),
+    ]):
+        continue
+    #thread_count = 4 if len(lines) > 1000 else 1 # slower...
+    thread_count = 1
+    thread_line_count = len(lines) // thread_count + 1
+    threads = [MessageParserThread(filename, chunk) 
+               for chunk in lib.chunks(lines, thread_line_count)] 
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+        file_events += t.result
+
+    file_events = list(filter(None, file_events))
+    
+    # if file mtime < last event, reyear backwards
+    mtime = lib.normalize_datetime(os.path.getmtime(filename))
+    #log.info('  mtime:', mtime)
+    try: # as timestamp might be None
+        if file_events and mtime < file_events[-1].timestamp:
+            if Message.debug_parsing or True: # TODO remove after PROBLEM is solved
+                log.info('  Using mtime (%s) to fix dates.' % str(mtime))
+            last_event_timestamp = mtime
+            
+            for event in file_events[::-1]:
+                #print('fixing timestamp', event.timestamp)
+                print('fixing timestamp', event.message)
+                event.timestamp = event.timestamp.replace(year=last_event_timestamp.year)
+                if event.timestamp > last_event_timestamp:
+                    print(' decrementing year, cause actual', event.timestamp, '> last', last_event_timestamp)
+                    print('  for', event.message)
+                    event.timestamp = event.timestamp.replace(year=last_event_timestamp.year - 1)
+                print(' new timestamp:', event.timestamp)
+                last_event_timestamp = event.timestamp
+    except:
+        log.err('  Year fix failed.')
+        traceback.print_exc()
+    events += file_events
+        
+
+events = sorted(events, key=lambda x: (x.timestamp 
+                                       if x.timestamp 
+                                       else lib.normalize_datetime()))
+
+timed_events = [e for e in events if e.category != 'UNKNOWN' and e.timestamp]
+start = timed_events[0].timestamp
+end = timed_events[-1].timestamp
+log.info('Events span from %s to %s.' % (start, end))
+
+
+"""
+deal with commands
+"""
+while True:
+    # get command
+    try:
+        cmd = input(log.COLOR_PURPLE + '--} ' + log.COLOR_NONE).strip()
+    except EOFError: # Ctrl+D -> quit
+        log.newline()
+        lib.exit_program(None, None)
+    if len(cmd) == 0:
+        continue
+    # quit?
+    if lib.quit_string(cmd):
+        log.warn('Do you really want to quit? ', new_line=False)
+        if lib.positive(input()):
+            lib.exit_program(None, None)
+        continue
+    # do command
+    # test
+    if cmd.startswith('test'):
+        print(Filter.parse(cmd[4:]))
+
+    # set start
+    elif cmd.startswith('start '):
+        given = lib.normalize_datetime(cmd[6:])
+        if given:
+            start = given
+        else:
+            log.err('Invalid date.')
+
+    # set end
+    elif cmd.startswith('end '):
+        given = lib.normalize_datetime(cmd[4:])
+        if given:
+            end = given
+        else:
+            log.err('Invalid date.')
+
+    # list events
+    elif cmd.startswith('list events'):
+        """
+        list detailed events based on optional display filter
+        """
+        log.info('Showing events from %s to %s.' % (start, end))
+        list_events(events, cmd[11:], start, end)
+    # list X
+    elif cmd.startswith('list'):
+        try:
+            log.info('Showing counts for events from %s to %s.' % (start, end))
+            #if cmd in ('list time', 'list timestamp'):
+            #    log.info('First event:', start)
+
+            list_overview(events, cmd.split()[1], ' '.join(cmd.split()[2:]),
+                          start, end)
+
+            #if cmd in ('list time', 'list timestamp'):
+            #    log.info('Last event:', end)
+        except:
+            traceback.print_exc()
+            log.info('Usage: list events|source|category|<attribute> [<filter>]')
+    else:
+        log.warn('Unknown command.')
+
