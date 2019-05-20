@@ -121,30 +121,14 @@ def list_overview(events, what, display_filter_str):
         for i in range(len(counters)):
             severity_totals[i] += counters[i]
         
-        # set color if suspicious
-        try:
-            incidents = Message.suspicious[what][parameter]
-            if max(count for _,count in incidents.items()) >= 3:  # TODO or sum?
-                suspicious_color = log.COLOR_RED
-            else:
-                suspicious_color = log.COLOR_YELLOW
-        except:
-            #traceback.print_exc()
-            incidents = None
-            suspicious_color = log.COLOR_NONE
             
-        print('%s%-*s%s' % (suspicious_color, 
-                            param_max_len, 
-                            parameter, 
-                            log.COLOR_NONE), 
+        print('%-*s' % (param_max_len, 
+                        parameter), 
               '  '.join('%s%8s%s' % (log.COLOR_NONE, 
                                        str(c or '.'), 
                                        log.COLOR_NONE) 
                         for c in counters), 
               '\u2502 %d' % sum(counters))
-        if incidents:
-            for incident_type, count in incidents.items():
-                print(' - %s (%d)' % (incident_type, count))
     
     # also print severity totals
     if what != 'attributes':
