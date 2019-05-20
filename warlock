@@ -137,7 +137,17 @@ while True:
 
     # set start
     elif cmd.startswith('start '):
-        given = lib.normalize_datetime(cmd[6:])
+        value = cmd[6:]
+        if value == 'reset':
+            given = events[0].timestamp
+        else:
+            given = lib.normalize_datetime(value, silent=True)
+            if not given:
+                display_filter = Filter.parse(value)
+                filtered = [e for e in events 
+                            if not display_filter or display_filter.test(e)]
+                if filtered:
+                    given = filtered[0].timestamp
         if given:
             start = given
         else:
@@ -145,7 +155,17 @@ while True:
 
     # set end
     elif cmd.startswith('end '):
-        given = lib.normalize_datetime(cmd[4:])
+        value = cmd[4:]
+        if value == 'reset':
+            given = events[-1].timestamp
+        else:
+            given = lib.normalize_datetime(value, silent=True)
+            if not given:
+                display_filter = Filter.parse(value)
+                filtered = [e for e in events 
+                            if not display_filter or display_filter.test(e)]
+                if filtered:
+                    given = filtered[-1].timestamp
         if given:
             end = given
         else:

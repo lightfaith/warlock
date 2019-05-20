@@ -219,7 +219,7 @@ class Message:
          '%{SYSLOGTIMESTAMP:timestamp} %{SYSLOGHOST:hostname} sshd(?:\\[%{POSINT:pid}\\])?: %{DATA:result} %{DATA:method} for (invalid user )?%{DATA:user} from %{IPORHOST:ip} port %{NUMBER:port} ssh2(: %{GREEDYDATA:signature})?', 
          lambda source: re.search(r'auth\.log(\.\d)?$', source)),
         # auth through login 
-        ('auth', 
+        ('auth', # TODO May  2 23:06:14 app-1 login[5130]: pam_unix(login:auth): authentication failure; logname=LOGIN uid=0 euid=0 tty=tty1 ruser= rhost=  user=user1                                                          
          '%{SYSLOGTIMESTAMP:timestamp} %{SYSLOGHOST:hostname} login(?:\\[%{POSINT:pid}\\])?: pam_unix%{GREEDYDATA}: %{DATA:event}; %{GREEDYDATA} user=%{GREEDYDATA:user}',
          lambda source: re.search(r'auth\.log(\.\d)?$', source)),
         # sshd reverse mapping fail

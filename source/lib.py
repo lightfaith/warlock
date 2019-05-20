@@ -48,7 +48,7 @@ def chunks(data, size):
     for i in range(0, len(data), size):
         yield data[i:i+size]
 
-def normalize_datetime(time=None):
+def normalize_datetime(time=None, silent=False):
     if not time:
         return datetime.now()
     if type(time) == str:
@@ -61,7 +61,8 @@ def normalize_datetime(time=None):
                 if variant == 1: # apache-access format
                     time = time.replace(':', ' ', 1)
                 else:
-                    log.err('  Cannot unify datetime:', time)
+                    if not silent:
+                        log.err('  Cannot unify datetime:', time)
                     return None
     elif type(time) == datetime:
         return time.replace(tzinfo=None)
@@ -69,7 +70,8 @@ def normalize_datetime(time=None):
         # probably UNIX timestamp
         return datetime.fromtimestamp(time)
     else:
-        log.err('  Unknown time type:', time, type(time))
+        if not silent:
+            log.err('  Unknown time type:', time, type(time))
         return None
 
 def natural_sort(data, key=lambda x: x):
