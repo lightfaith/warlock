@@ -12,7 +12,7 @@ import matplotlib.ticker as ticker
 
 from source.parser import Message
 
-def list_events(events, display_filter_str, start, end):
+def list_events(events, display_filter_str):
     #print('display_filter_str: "%s"' % display_filter_str)
     display_filter = None
     count = 0
@@ -26,20 +26,18 @@ def list_events(events, display_filter_str, start, end):
         #print('Set count:', count, 'filter is', display_filter)
     if not display_filter:
         display_filter = Filter.parse(display_filter_str)
-        
-    sleep(2)
+    
+    #print(count, display_filter)
     i = 0
     for event in events:
-        if not (start <= event.timestamp <= end):
-            continue
         if (not display_filter) or display_filter.test(event):
             print(event)
             i += 1
-            if i >= count:
+            if count and i >= count:
                 break
 
 
-def list_suspicious(events, what, display_filter_str, start, end):
+def list_suspicious(events, what, display_filter_str):
     display_filter = Filter.parse(display_filter_str)
 
     severities = ('UNKNOWN', 'none', 'info', 'notice', 'warning', 'critical')
@@ -68,15 +66,13 @@ def list_suspicious(events, what, display_filter_str, start, end):
         print('TOTAL:',len(problems))
 
 
-def list_overview(events, what, display_filter_str, start, end):
+def list_overview(events, what, display_filter_str):
     display_filter = Filter.parse(display_filter_str)
 
     severities = ('UNKNOWN', 'none', 'info', 'notice', 'warning', 'critical')
 
     d = {} if what == 'attributes' else {'{NONE}': []}
     for event in events:
-        if not (start <= event.timestamp <= end):
-            continue
         if display_filter and not display_filter.test(event):
             continue
 
@@ -161,25 +157,19 @@ def list_overview(events, what, display_filter_str, start, end):
               '\u2502 %d' % sum(severity_totals))
         
 
-def plot(events, display_filter_str, start, end):
+def plot(events, display_filter_str):
     display_filter = Filter.parse(display_filter_str)
 
     severities = ('UNKNOWN', 'none', 'info', 'notice', 'warning', 'critical')
 
     to_show = [event for event in events 
-               if start <= event.timestamp <= end 
-               and (not display_filter or display_filter.test(event))]
+               if not display_filter or display_filter.test(event)]
     if to_show:
         log.info('Will plot %d events.' % len(to_show))
     else:
         log.warn('No events match criteria.')
         return
 
-    ## use events to get actual start and end
-    #start = to_show[0].timestamp
-    #end = to_show[-1].timestamp
-    #print('Start:', start)
-    #print('End:', end)
 
     # TODO fix ticks
     #plt.style.use('dark_background')

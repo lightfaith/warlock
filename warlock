@@ -110,6 +110,7 @@ end = timed_events[-1].timestamp
 log.info('Found %d events from %s to %s.' % (len(events), start, end))
 
 
+events_limited = events
 """
 deal with commands
 """
@@ -132,8 +133,9 @@ while True:
 
     # test
     if cmd.startswith('test'):
-        print(Message.suspicious.keys())
-        print(Message.suspicious.get('ip'))
+        for e in events:
+            if e.severity == 'warning':
+                print(e)
 
     # set stART
     elif cmd.startswith('start '):
@@ -144,13 +146,14 @@ while True:
             given = lib.normalize_datetime(value, silent=True)
             if not given:
                 display_filter = Filter.parse(value)
-                filtered = [e for e in events 
+                filtered = [e for e in events
                             if not display_filter or display_filter.test(e)]
                 if filtered:
                     given = filtered[0].timestamp
         if given:
             start = given
-            log.info('Showing events from %s to %s.' % (start, end))
+            log.info('Working with events from %s to %s.' % (start, end))
+            events_limited = [e for e in events if start <= e.timestamp <= end]
         else:
             log.err('Usage: start <datetime>|reset|<filter>')
 
@@ -169,7 +172,8 @@ while True:
                     given = filtered[-1].timestamp
         if given:
             end = given
-            log.info('Showing events from %s to %s.' % (start, end))
+            log.info('Working with events from %s to %s.' % (start, end))
+            events_limited = [e for e in events if start <= e.timestamp <= end]
         else:
             log.err('Usage: end <datetime>|reset|<filter>')
 
@@ -179,15 +183,14 @@ while True:
         list detailed events based on optional display filter
         """
         log.info('Showing events from %s to %s.' % (start, end))
-        list_events(events, cmd[12:], start, end)
+        list_events(events_limited, cmd[12:])
 
     # list suspicious
     elif cmd.startswith('suspicious'):
         try:
             log.info('Showing suspicious for events from %s to %s.' % (start, end))
 
-            list_suspicious(events, cmd.split()[1], ' '.join(cmd.split()[2:]),
-                          start, end)
+            list_suspicious(events_limited, cmd.split()[1], ' '.join(cmd.split()[2:]))
         except:
             traceback.print_exc()
             log.err('Usage: suspicious ip|user [<filter>]')
@@ -197,8 +200,7 @@ while True:
         try:
             log.info('Showing counts for events from %s to %s.' % (start, end))
 
-            list_overview(events, cmd.split()[1], ' '.join(cmd.split()[2:]),
-                          start, end)
+            list_overview(events_limited, cmd.split()[1], ' '.join(cmd.split()[2:]))
 
         except:
             traceback.print_exc()
@@ -206,7 +208,8 @@ while True:
    
     # plot
     elif cmd.startswith('plot'):
-        plot(events, cmd[4:], start, end)
+        plot(events_limited, cmd[4:])
+
     else:
         log.warn('Unknown command.')
 

@@ -72,19 +72,19 @@ def show_marked(c, color='', *args, new_line=True, stdout=True, file=sys.stdout)
 
 
 def ok(*args, new_line=True, stdout=True):
-    return show_marked('[+] ', COLOR_GREEN, *args, new_line=new_line, stdout=stdout)
+    return show_marked('[+]', COLOR_GREEN, *args, new_line=new_line, stdout=stdout)
  
 def info(*args, new_line=True, stdout=True, file=sys.stderr):
-    return show_marked('[.] ', COLOR_BLUE, *args, new_line=new_line, stdout=stdout)
+    return show_marked('[.]', COLOR_BLUE, *args, new_line=new_line, stdout=stdout)
  
 def warn(*args, new_line=True, stdout=True, file=sys.stderr):
-    return show_marked('[!] ', COLOR_YELLOW, *args, new_line=new_line, stdout=stdout)
+    return show_marked('[!]', COLOR_YELLOW, *args, new_line=new_line, stdout=stdout)
  
 def err(*args, new_line=True, stdout=True, file=sys.stderr):
-    return show_marked('[-] ', COLOR_RED, *args, new_line=new_line, stdout=stdout)
+    return show_marked('[-]', COLOR_RED, *args, new_line=new_line, stdout=stdout)
  
 def question(*args, new_line=True, stdout=True):
-    return show_marked('[?] ', COLOR_CYAN, *args, new_line=new_line, stdout=stdout)
+    return show_marked('[?]', COLOR_CYAN, *args, new_line=new_line, stdout=stdout)
  
 
 """
