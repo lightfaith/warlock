@@ -3,6 +3,7 @@ import re
 from source import lib
 from source import log
 import traceback
+from time import sleep
 
 from collections import OrderedDict
 import matplotlib.pyplot as plt
@@ -12,12 +13,30 @@ import matplotlib.ticker as ticker
 from source.parser import Message
 
 def list_events(events, display_filter_str, start, end):
-    display_filter = Filter.parse(display_filter_str)
+    #print('display_filter_str: "%s"' % display_filter_str)
+    display_filter = None
+    count = 0
+    try:
+        first_word = display_filter_str.split()[0]
+    except:
+        first_word = None
+    if first_word.isdigit():
+        display_filter = Filter.parse(display_filter_str[len(first_word):])
+        count = int(first_word)
+        #print('Set count:', count, 'filter is', display_filter)
+    if not display_filter:
+        display_filter = Filter.parse(display_filter_str)
+        
+    sleep(2)
+    i = 0
     for event in events:
         if not (start <= event.timestamp <= end):
             continue
         if (not display_filter) or display_filter.test(event):
             print(event)
+            i += 1
+            if i >= count:
+                break
 
 
 def list_suspicious(events, what, display_filter_str, start, end):

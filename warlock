@@ -135,7 +135,7 @@ while True:
         print(Message.suspicious.keys())
         print(Message.suspicious.get('ip'))
 
-    # set start
+    # set stART
     elif cmd.startswith('start '):
         value = cmd[6:]
         if value == 'reset':
@@ -150,8 +150,9 @@ while True:
                     given = filtered[0].timestamp
         if given:
             start = given
+            log.info('Showing events from %s to %s.' % (start, end))
         else:
-            log.err('Invalid date.')
+            log.err('Usage: start <datetime>|reset|<filter>')
 
     # set end
     elif cmd.startswith('end '):
@@ -168,8 +169,9 @@ while True:
                     given = filtered[-1].timestamp
         if given:
             end = given
+            log.info('Showing events from %s to %s.' % (start, end))
         else:
-            log.err('Invalid date.')
+            log.err('Usage: end <datetime>|reset|<filter>')
 
     # list events
     elif cmd.startswith('list events'):
@@ -177,7 +179,7 @@ while True:
         list detailed events based on optional display filter
         """
         log.info('Showing events from %s to %s.' % (start, end))
-        list_events(events, cmd[11:], start, end)
+        list_events(events, cmd[12:], start, end)
 
     # list suspicious
     elif cmd.startswith('suspicious'):

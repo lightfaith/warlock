@@ -83,7 +83,7 @@ class Message:
                 self.score = 3
             del self.attributes['result']
 
-        elif self.category in ('groupadd', 'useradd',):
+        elif self.category in ('groupadd', 'useradd', 'chsh', ):
             self.score = 4
 
         elif self.category in ('auth',):
