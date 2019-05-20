@@ -99,7 +99,9 @@ class Message:
             else:
                 self.score = 2
                 # TODO fail with login
-
+        elif self.category == 'cron-session':
+            self.score = 2
+            
         elif self.category == 'kernel':
             if 'entered promiscuous mode' in self.message:
                 self.score = 4
@@ -225,6 +227,10 @@ class Message:
         # sshd reverse mapping fail
         ('auth', 
          '%{SYSLOGTIMESTAMP:timestamp} %{SYSLOGHOST:hostname} sshd(?:\\[%{POSINT:pid}\\])?: reverse mapping checking getaddrinfo for %{GREEDYDATA} \\[%{IPORHOST:ip}\\] failed - %{GREEDYDATA:error}',
+         lambda source: re.search(r'auth\.log(\.\d)?$', source)),
+        # cron session
+        ('cron-session', 
+         '%{SYSLOGTIMESTAMP:timestamp} %{SYSLOGHOST:hostname} CRON(?:\\[%{POSINT:pid}\\])?: %{GREEDYDATA} session %{DATA} for user %{WORD:user}( by \\(uid=%{NUMBER:uid}\\))?',
          lambda source: re.search(r'auth\.log(\.\d)?$', source)),
         # sudo
         ('sudo', 
