@@ -247,6 +247,9 @@ class Filter:
                 return float(self.value)
             except:
                 pass
+            as_date = lib.normalize_datetime(self.value, silent=True)
+            if as_date:
+                return as_date
             # dynamic
             dynamic = {
                 'time': event.timestamp,
