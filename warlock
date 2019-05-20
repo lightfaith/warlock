@@ -133,9 +133,7 @@ while True:
 
     # test
     if cmd.startswith('test'):
-        for e in events:
-            if e.severity == 'warning':
-                print(e)
+        venn(events, 'category == auth', 'severity == critical')
 
     # set stART
     elif cmd.startswith('start '):

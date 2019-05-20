@@ -9,6 +9,7 @@ from collections import OrderedDict
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import matplotlib.ticker as ticker
+from venn import venn as venn_diagram
 
 from source.parser import Message
 
@@ -174,6 +175,16 @@ def plot(events, display_filter_str):
     plt.legend()
     plt.show()
 
+
+def venn(events, *filters):
+    if len(filters) > 6:
+        log.err('Too many filters.')
+        return
+
+    filters = {f: Filter.parse(f) for f in filters}
+    to_show = {f: set(e for e in events if F.test(e)) for f, F in filters.items()}
+    venn_diagram(to_show)
+    plt.show()
 
 class Filter:
     debug_filter = False
