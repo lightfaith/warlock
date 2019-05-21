@@ -1,4 +1,5 @@
 #!/usr/bin/python3
+import pdb
 import re
 from source import lib
 from source import log
@@ -39,10 +40,6 @@ def list_events(events, display_filter_str):
 
 
 def list_suspicious(events, what, display_filter_str):
-    display_filter = Filter.parse(display_filter_str)
-
-    severities = ('UNKNOWN', 'none', 'info', 'notice', 'warning', 'critical')
-
     if what in Message.suspicious.keys():
         problems = lib.natural_sort(Message.suspicious[what].items(), key = lambda x: x[0])
         for troublemaker, incidents in problems:
@@ -69,7 +66,6 @@ def list_suspicious(events, what, display_filter_str):
 
 def list_overview(events, what, display_filter_str):
     display_filter = Filter.parse(display_filter_str)
-
     severities = ('UNKNOWN', 'none', 'info', 'notice', 'warning', 'critical')
 
     d = {} if what == 'attributes' else {'{NONE}': []}
@@ -134,7 +130,7 @@ def list_overview(events, what, display_filter_str):
     # also print severity totals
     if what != 'attributes':
         print('\u2500' * (param_max_len + 6 * 10) + '\u253c' + '\u2500' * 10)
-        print('%-*s' % (param_max_len, 'TOTAL'), 
+        print('%s%-*s%s' % (log.COLOR_BLUE, param_max_len, 'TOTAL', log.COLOR_NONE), 
               '  '.join('%s%8s%s' % (log.COLOR_NONE, 
                                        str(st or '.'), 
                                        log.COLOR_NONE) 
@@ -200,6 +196,7 @@ class Filter:
         'not': (0.3, lambda x: not x),
         'contains': (0.5, lambda x, y: str(y) in x),
         'matches': (0.5, lambda x, y: re.search(str(y), x)),
+        'suspicious': (0.5, lambda x: x in [k for _,v in Message.suspicious.items() for k in v.keys()]),
         #'multior':, # TODO
     }
     
@@ -290,10 +287,11 @@ class Filter:
         ()
         " "
         ' '
+        suspicious x
 
         x: timestamp, score, severity, source, category, message, <attr>
         """
-        pattern = r'(".*?"|\'.*?\'|==|!=|<=|<|>=|>| or | and |not |\(|\)|contains|matches|,)'
+        pattern = r'(".*?"|\'.*?\'|==|!=|<=|<|>=|>| or | and |not |\(|\)|contains|matches|suspicious|,)'
         parts = [x.strip() for x in re.split(pattern, string) if x.strip()]
         #print(parts)
         """ for each element compute its level """

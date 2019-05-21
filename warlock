@@ -1,6 +1,7 @@
 #!/usr/bin/python3
 
 import os
+import pdb
 import sys
 import gnureadline
 import traceback
@@ -133,7 +134,8 @@ while True:
 
     # test
     if cmd.startswith('test'):
-        venn(events, 'category == auth', 'severity == critical')
+        #venn(events, 'category == auth', 'severity == critical')
+        pdb.set_trace()
 
     # set stART
     elif cmd.startswith('start '):

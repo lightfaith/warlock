@@ -96,11 +96,11 @@ class Message:
                 else:
                     self.score = 2
                 del self.attributes['result']
-            elif 'error' in self.attributes.keys():
+            elif ('event' in self.attributes.keys() 
+                  and 'failure' in self.attributes['event']):
                 self.score = 9
             else:
                 self.score = 2
-                # TODO fail with login
         elif self.category == 'cron-session':
             self.score = 2
             
@@ -127,6 +127,8 @@ class Message:
                 if re.search(r'PLEASE REMEMBER TO SET A PASSWORD', self.message):
                     self.score = 6
             elif self.attributes['service'] == 'sshd':
+                if 'error' in self.attributes.keys():
+                    self.score = 7
                 if re.search(r'error: Bind to port \d+ on .+ failed', self.message):
                     self.score = 4
                 elif re.search('session (?:opened|closed) for user (\w+) by', self.message):
@@ -217,7 +219,7 @@ class Message:
         if Message.debug_parsing:
             log.info('Parsing message: %s%s%s' 
                      % (log.COLOR_GREY, message, log.COLOR_NONE))
-        for category, pattern, assertion in Message.patterns[start:end]:
+        for category, pattern, assertion, add in Message.patterns[start:end]:
             if not assertion(source):
                 continue
             parsed = pattern.match(message)
@@ -226,10 +228,16 @@ class Message:
                     log.info('  Matches %s' % pattern.pattern)
                     if category == 'UNKNOWN':
                         log.warn('    which is \'UNKNOWN\' format.')
+                for k, v in add.items():
+                    parsed[k] = v
                 #print(parsed)
                 #print()
                 """ return new Parser object """
-                return Message(source, category, message, pattern.pattern, parsed)
+                return Message(source, 
+                               category, 
+                               message, 
+                               pattern.pattern, 
+                               parsed)
         if Message.debug_parsing:
             log.warn('  No match, no timestamp!')
         return None
@@ -248,92 +256,138 @@ class Message:
         ('sudouser', lambda x: x, ('sudouser',)),
         ('command', lambda x: x, ('command',)),
         ('error', lambda x: x, ('error',)),
+        ('event', lambda x: x, ('event',)),
         ('service', lambda x: x, ('service',)),
         ('result', lambda x: x, ('result',)),
         ('other', lambda x: x, ('other',)),
     ]
 
     # patterns
-    patterns = [(category, Grok(pattern), assertion) 
-                for category, pattern, assertion in [
-        ('apache-access', '^%{COMMONAPACHELOG}$', lambda source: 'www' in source or re.search(r'access\.log(\.\d)?$', source)),
-        ('apache-access', '^%{COMBINEDAPACHELOG}$', lambda source: 'www' in source or re.search(r'access\.log(\.\d)?$', source)),
-        ('apache-access', '^%{COMBINEDAPACHELOG} %{GREEDYDATA:other}$', lambda source: 'www' in source or re.search(r'access\.log(\.\d)?$', source)),
-        ('apache-error', '^%{HTTPD_ERRORLOG}$', lambda source: 'www' in source or re.search(r'error\.log(\.\d)?$', source)),
-        ('apache-error', '^%{HTTPD_ERRORLOG} %{GREEDYDATA:other}$', lambda source: 'www' in source or re.search(r'error\.log(\.\d)?$', source)),
+    patterns = [(category, Grok(pattern), assertion, add) 
+                for category, pattern, assertion, add in [
+        ('apache-access', 
+         '^%{COMMONAPACHELOG}$', 
+         lambda source: ('www' in source 
+                         or re.search(r'access\.log(\.\d)?$', source)),
+         {}),
+        ('apache-access', 
+         '^%{COMBINEDAPACHELOG}$', 
+         lambda source: ('www' in source 
+                         or re.search(r'access\.log(\.\d)?$', source)),
+         {}),
+        ('apache-access', 
+         '^%{COMBINEDAPACHELOG} %{GREEDYDATA:other}$', 
+         lambda source: ('www' in source 
+                         or re.search(r'access\.log(\.\d)?$', source)),
+         {}),
+        ('apache-error', 
+         '^%{HTTPD_ERRORLOG}$', 
+         lambda source: ('www' in source 
+                         or re.search(r'error\.log(\.\d)?$', source)),
+         {}),
+        ('apache-error', 
+         '^%{HTTPD_ERRORLOG} %{GREEDYDATA:other}$', 
+         lambda source: ('www' in source 
+                         or re.search(r'error\.log(\.\d)?$', source)),
+         {}),
 
         # auth with SSH key or password
         ('auth', 
          '%{SYSLOGTIMESTAMP:timestamp} %{SYSLOGHOST:hostname} sshd(?:\\[%{POSINT:pid}\\])?: %{DATA:result} %{DATA:method} for (invalid user )?%{DATA:user} from %{IPORHOST:ip} port %{NUMBER:port} ssh2(: %{GREEDYDATA:signature})?', 
-         lambda source: re.search(r'auth\.log(\.\d)?$', source)),
+         lambda source: re.search(r'auth\.log(\.\d)?$', source),
+         {}),
         # auth through login 
-        ('auth', # TODO May  2 23:06:14 app-1 login[5130]: pam_unix(login:auth): authentication failure; logname=LOGIN uid=0 euid=0 tty=tty1 ruser= rhost=  user=user1                                                          
+        ('auth', # TODO May  2 23:06:14 app-1 login[5130]: pam_unix(login:auth): authentication failure; logname=LOGIN uid=0 euid=0 tty=tty1 ruser= rhost=  user=user1                                                        
          '%{SYSLOGTIMESTAMP:timestamp} %{SYSLOGHOST:hostname} login(?:\\[%{POSINT:pid}\\])?: pam_unix%{GREEDYDATA}: %{DATA:event}; %{GREEDYDATA} user=%{GREEDYDATA:user}',
-         lambda source: re.search(r'auth\.log(\.\d)?$', source)),
-        # sshd reverse mapping fail
-        ('auth', 
-         '%{SYSLOGTIMESTAMP:timestamp} %{SYSLOGHOST:hostname} sshd(?:\\[%{POSINT:pid}\\])?: reverse mapping checking getaddrinfo for %{GREEDYDATA} \\[%{IPORHOST:ip}\\] failed - %{GREEDYDATA:error}',
-         lambda source: re.search(r'auth\.log(\.\d)?$', source)),
+         lambda source: re.search(r'auth\.log(\.\d)?$', source),
+         {}),
         # cron session
         ('cron-session', 
          '%{SYSLOGTIMESTAMP:timestamp} %{SYSLOGHOST:hostname} CRON(?:\\[%{POSINT:pid}\\])?: %{GREEDYDATA} session %{DATA} for user %{WORD:user}( by \\(uid=%{NUMBER:uid}\\))?',
-         lambda source: re.search(r'auth\.log(\.\d)?$', source)),
+         lambda source: re.search(r'auth\.log(\.\d)?$', source),
+         {}),
         # sudo
         ('sudo', 
          "%{SYSLOGTIMESTAMP:timestamp} %{SYSLOGHOST:hostname} sudo(?:\\[%{POSINT:pid}\\])?: \\s*%{DATA:user} :( %{DATA:error} ;)? TTY=%{DATA:tty} ; PWD=%{DATA:pwd} ; USER=%{DATA:sudouser} ; COMMAND=%{GREEDYDATA:command}", 
-         lambda source: re.search(r'auth\.log(\.\d)?$', source)),
+         lambda source: re.search(r'auth\.log(\.\d)?$', source),
+         {}),
         # su
         ('su', 
          '%{SYSLOGTIMESTAMP:timestamp} %{SYSLOGHOST:hostname} su(?:\\[%{POSINT:pid}\\])?: %{GREEDYDATA:result} su for %{DATA:sudouser} by %{GREEDYDATA:user}',
-         lambda source: re.search(r'auth\.log(\.\d)?$', source)),
+         lambda source: re.search(r'auth\.log(\.\d)?$', source),
+         {}),
 
         # user modification
         ('useradd', 
          '%{SYSLOGTIMESTAMP:timestamp} %{SYSLOGHOST:hostname} useradd(?:\\[%{POSINT:pid}\\])?: new user: name=%{DATA:user}, UID=%{NUMBER:uid}, GID=%{NUMBER:gid}, home=%{DATA:home}, shell=%{DATA:shell}$', 
-         lambda source: re.search(r'auth\.log(\.\d)?$', source)),
+         lambda source: re.search(r'auth\.log(\.\d)?$', source),
+         {}),
         ('groupadd', 
          '%{SYSLOGTIMESTAMP:timestamp} %{SYSLOGHOST:hostname} groupadd(?:\\[%{POSINT:pid}\\])?: new group: name=%{DATA:group}, GID=%{NUMBER:gid}', 
-         lambda source: re.search(r'auth\.log(\.\d)?$', source)),
+         lambda source: re.search(r'auth\.log(\.\d)?$', source),
+         {}),
         ('chsh', 
          '%{SYSLOGTIMESTAMP:timestamp} %{SYSLOGHOST:hostname} chsh(?:\\[%{POSINT:pid}\\])?: changed user `%{DATA:user}\' shell to `%{DATA:shell}\'',
-         lambda source: re.search(r'auth\.log(\.\d)?$', source)),
+         lambda source: re.search(r'auth\.log(\.\d)?$', source),
+         {}),
         ('passwd', 
          '%{SYSLOGTIMESTAMP:timestamp} %{SYSLOGHOST:hostname} passwd(?:\\[%{POSINT:pid}\\])?: %{GREEDYDATA} password changed for %{GREEDYDATA:user}',
-         lambda source: re.search(r'auth\.log(\.\d)?$', source)),
+         lambda source: re.search(r'auth\.log(\.\d)?$', source),
+         {}),
         ('passwd', 
          '%{SYSLOGTIMESTAMP:timestamp} %{SYSLOGHOST:hostname} usermod(?:\\[%{POSINT:pid}\\])?: change user `%{DATA:user}\' password',
-         lambda source: re.search(r'auth\.log(\.\d)?$', source)),
+         lambda source: re.search(r'auth\.log(\.\d)?$', source),
+         {}),
         ('chage', 
          '%{SYSLOGTIMESTAMP:timestamp} %{SYSLOGHOST:hostname} chage(?:\\[%{POSINT:pid}\\])?: changed password expiry for %{GREEDYDATA:user}',
-         lambda source: re.search(r'auth\.log(\.\d)?$', source)),
+         lambda source: re.search(r'auth\.log(\.\d)?$', source),
+         {}),
         ('chfn', 
          '%{SYSLOGTIMESTAMP:timestamp} %{SYSLOGHOST:hostname} chfn(?:\\[%{POSINT:pid}\\])?: changed user `%{DATA:user}\' information',
-         lambda source: re.search(r'auth\.log(\.\d)?$', source)),
+         lambda source: re.search(r'auth\.log(\.\d)?$', source),
+         {}),
         ('userdel', 
          '%{SYSLOGTIMESTAMP:timestamp} %{SYSLOGHOST:hostname} userdel(?:\\[%{POSINT:pid}\\])?: delete user `%{DATA:user}\'',
-         lambda source: re.search(r'auth\.log(\.\d)?$', source)),
+         lambda source: re.search(r'auth\.log(\.\d)?$', source),
+         {}),
         ('groupdel', 
          '%{SYSLOGTIMESTAMP:timestamp} %{SYSLOGHOST:hostname} userdel(?:\\[%{POSINT:pid}\\])?: removed group `%{DATA:group}\' owned by `%{DATA:user}\'',
-         lambda source: re.search(r'auth\.log(\.\d)?$', source)),
+         lambda source: re.search(r'auth\.log(\.\d)?$', source),
+         {}),
 
         # kernel         
         ('kernel', 
          '%{SYSLOGTIMESTAMP:timestamp} %{SYSLOGHOST:hostname} kernel: ', 
-         lambda source: re.search(r'kern\.log(\.\d)?$', source)),
+         lambda source: re.search(r'kern\.log(\.\d)?$', source),
+         {}),
         ('kernel', 
          '', 
-         lambda source: re.search(r'dmesg(\.\d)?$', source)),
+         lambda source: re.search(r'dmesg(\.\d)?$', source),
+         {}),
 
         ('tor', 
          '%{SYSLOGTIMESTAMP:timestamp}', 
-         lambda source: re.search(r'tor/debug\.log(\.\d)?$', source)),
+         lambda source: re.search(r'tor/debug\.log(\.\d)?$', source),
+         {}),
         
+        #########
+        # DAEMON
+        #########
+        # sshd reverse mapping fail
+        ('daemon', 
+         '%{SYSLOGTIMESTAMP:timestamp} %{SYSLOGHOST:hostname} sshd(?:\\[%{POSINT:pid}\\])?: reverse mapping checking getaddrinfo for %{GREEDYDATA} \\[%{IPORHOST:ip}\\] failed - %{GREEDYDATA:error}',
+         lambda source: re.search(r'auth\.log(\.\d)?$', source),
+         {'service': 'sshd'}),
+
         # generic daemon
         ('daemon', 
          '%{SYSLOGTIMESTAMP:timestamp} %{SYSLOGHOST:hostname} %{DATA:service}(?:\\[%{POSINT:pid}\\])?: ', 
-         lambda source: True),
+         lambda source: True,
+         {}),
 
+        ####
         # last resort for timed events
-        ('UNKNOWN', '%{SYSLOGTIMESTAMP:timestamp}', lambda source: True),
+        ####
+        ('UNKNOWN', '%{SYSLOGTIMESTAMP:timestamp}', lambda source: True, {}),
     ]]
 
