@@ -6,6 +6,7 @@ from datetime import datetime
 from source import lib
 from source import log
 from threading import Thread
+import pdb
 
 class MessageParserThread(Thread):
     def __init__(self, filename, lines):
@@ -68,7 +69,7 @@ class Message:
         if self.category == 'kernel':
             self.attributes['service'] = 'kernel'
 
-        if self.category == 'sudo':
+        elif self.category == 'sudo':
             if 'error' in self.attributes.keys():
                 self.score = 9
                 Message.mark_suspicious(self, 'sudo failed')
@@ -83,7 +84,8 @@ class Message:
                 self.score = 3
             del self.attributes['result']
 
-        elif self.category in ('groupadd', 'useradd', 'chsh', ):
+        elif self.category in ('groupadd', 'useradd', 'chsh', 'passwd', 
+                               'chage', 'chfn', 'userdel', 'groupdel'):
             self.score = 4
 
         elif self.category in ('auth',):
@@ -111,8 +113,44 @@ class Message:
         elif self.category == 'daemon':
             if self.attributes['service'] == 'login':
                 if re.search(r'(A|a)uthentication failure', self.message):
-                    self.score == 8
+                    self.score = 8
                     Message.mark_suspicious(self, '\'login\' auth failed')
+                else:
+                    self.score = 2
+            elif self.attributes['service'] in ('dhclient', 'ntpdate'):
+                self.score = 2
+            elif self.attributes['service'] == 'init':
+                self.score = 4
+            elif self.attributes['service'] in ('su', 'sudo'):
+                self.score = 2
+            elif self.attributes['service'] == 'mysqld_safe':
+                if re.search(r'PLEASE REMEMBER TO SET A PASSWORD', self.message):
+                    self.score = 6
+            elif self.attributes['service'] == 'sshd':
+                if re.search(r'error: Bind to port \d+ on .+ failed', self.message):
+                    self.score = 4
+                elif re.search('session (?:opened|closed) for user (\w+) by', self.message):
+                    user = re.search('session (?:opened|closed) for user (\w+) by', self.message).group(1)
+                    self.attributes['user'] = user
+                    self.score = 2
+                elif re.search('Server listening on .+ port (\d+).', self.message):
+                    port = re.search('Server listening on .+ port (\d+).', self.message).group(1)
+                    self.score = 1 if port == 22 else 4
+                    
+            # TODO mysql
+            # TODO ntpd
+            
+            elif 'Timezone set to' in self.message:
+                self.score = 4
+        
+        elif self.category == 'apache-access':
+            if 'other' in self.attributes.keys():
+                self.score = 4
+        elif self.category == 'apache-error':
+            if 'other' in self.attributes.keys():
+                self.score = 4
+            if 'error reading the headers' in self.message:
+                self.score = 5
 
         #
         # set severity based on score
@@ -133,7 +171,12 @@ class Message:
     
     #################################################
     def __str__(self):
-        message_padded = '\n'.join(['    \u2502%-*s\u2502' % (Message.print_len, x) for x in [self.message[i:i+Message.print_len] for i in range(0, len(self.message), Message.print_len)]])
+        message_padded = '\n'.join(['    \u2502%-*s\u2502' 
+                                    % (Message.print_len, x) 
+                                    for x in [self.message[i:i+Message.print_len] 
+                                              for i in range(0, 
+                                                             len(self.message), 
+                                                             Message.print_len)]])
 
         return '%s%s < %d > %s (from %s): \n%s\n%s\n%s\n    attr: %s%s' % (
             lib.severity_colors[self.severity],
@@ -207,14 +250,17 @@ class Message:
         ('error', lambda x: x, ('error',)),
         ('service', lambda x: x, ('service',)),
         ('result', lambda x: x, ('result',)),
+        ('other', lambda x: x, ('other',)),
     ]
 
     # patterns
     patterns = [(category, Grok(pattern), assertion) 
                 for category, pattern, assertion in [
-        ('apache-access', '^%{COMMONAPACHELOG}$', lambda source: re.search(r'access\.log(\.\d)?$', source)),
-        ('apache-access', '^%{COMBINEDAPACHELOG}$', lambda source: re.search(r'access\.log(\.\d)?$', source)),
-        ('apache-error', '^%{HTTPD_ERRORLOG}$', lambda source: re.search(r'error\.log(\.\d)?$', source)),
+        ('apache-access', '^%{COMMONAPACHELOG}$', lambda source: 'www' in source or re.search(r'access\.log(\.\d)?$', source)),
+        ('apache-access', '^%{COMBINEDAPACHELOG}$', lambda source: 'www' in source or re.search(r'access\.log(\.\d)?$', source)),
+        ('apache-access', '^%{COMBINEDAPACHELOG} %{GREEDYDATA:other}$', lambda source: 'www' in source or re.search(r'access\.log(\.\d)?$', source)),
+        ('apache-error', '^%{HTTPD_ERRORLOG}$', lambda source: 'www' in source or re.search(r'error\.log(\.\d)?$', source)),
+        ('apache-error', '^%{HTTPD_ERRORLOG} %{GREEDYDATA:other}$', lambda source: 'www' in source or re.search(r'error\.log(\.\d)?$', source)),
 
         # auth with SSH key or password
         ('auth', 
@@ -251,7 +297,26 @@ class Message:
         ('chsh', 
          '%{SYSLOGTIMESTAMP:timestamp} %{SYSLOGHOST:hostname} chsh(?:\\[%{POSINT:pid}\\])?: changed user `%{DATA:user}\' shell to `%{DATA:shell}\'',
          lambda source: re.search(r'auth\.log(\.\d)?$', source)),
-        
+        ('passwd', 
+         '%{SYSLOGTIMESTAMP:timestamp} %{SYSLOGHOST:hostname} passwd(?:\\[%{POSINT:pid}\\])?: %{GREEDYDATA} password changed for %{GREEDYDATA:user}',
+         lambda source: re.search(r'auth\.log(\.\d)?$', source)),
+        ('passwd', 
+         '%{SYSLOGTIMESTAMP:timestamp} %{SYSLOGHOST:hostname} usermod(?:\\[%{POSINT:pid}\\])?: change user `%{DATA:user}\' password',
+         lambda source: re.search(r'auth\.log(\.\d)?$', source)),
+        ('chage', 
+         '%{SYSLOGTIMESTAMP:timestamp} %{SYSLOGHOST:hostname} chage(?:\\[%{POSINT:pid}\\])?: changed password expiry for %{GREEDYDATA:user}',
+         lambda source: re.search(r'auth\.log(\.\d)?$', source)),
+        ('chfn', 
+         '%{SYSLOGTIMESTAMP:timestamp} %{SYSLOGHOST:hostname} chfn(?:\\[%{POSINT:pid}\\])?: changed user `%{DATA:user}\' information',
+         lambda source: re.search(r'auth\.log(\.\d)?$', source)),
+        ('userdel', 
+         '%{SYSLOGTIMESTAMP:timestamp} %{SYSLOGHOST:hostname} userdel(?:\\[%{POSINT:pid}\\])?: delete user `%{DATA:user}\'',
+         lambda source: re.search(r'auth\.log(\.\d)?$', source)),
+        ('groupdel', 
+         '%{SYSLOGTIMESTAMP:timestamp} %{SYSLOGHOST:hostname} userdel(?:\\[%{POSINT:pid}\\])?: removed group `%{DATA:group}\' owned by `%{DATA:user}\'',
+         lambda source: re.search(r'auth\.log(\.\d)?$', source)),
+
+        # kernel         
         ('kernel', 
          '%{SYSLOGTIMESTAMP:timestamp} %{SYSLOGHOST:hostname} kernel: ', 
          lambda source: re.search(r'kern\.log(\.\d)?$', source)),

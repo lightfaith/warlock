@@ -100,8 +100,8 @@ def list_overview(events, what, display_filter_str):
             if not matched:
                 d['{NONE}'].append(event) 
 
-    param_max_len = max([0] + [len(str(k)) for k in d.keys()])
-    print(' ' * param_max_len, 
+    param_max_len = max([0] + [len(str(k)) for k in d.keys()] + [len(what)])
+    print('%s%-*s%s' % (log.COLOR_BLUE, param_max_len, what.upper(), log.COLOR_NONE), 
           '  '.join('%s%8s%s' 
                     % (lib.severity_colors[s], s, log.COLOR_NONE) 
                     for s in severities), 

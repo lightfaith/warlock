@@ -2,7 +2,7 @@
 
 import os
 import sys
-import readline
+import gnureadline
 import traceback
 #from datetime import datetime
 #from tzlocal import get_localzone
