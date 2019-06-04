@@ -48,9 +48,9 @@ elif os.path.isdir(path):
 parse events
 """
 
-events = {}
+events = []
 for filename, lines in logs.items():
-    file_events = {}
+    file_events = []
     log.info(filename)
     # skip /var/log/messages (non-critical stuff there)
     #      /var/log/debug.log (non-critical stuff there)
@@ -69,7 +69,7 @@ for filename, lines in logs.items():
     for t in threads:
         t.join()
         # add data
-        lib.merge_dicts(file_events, t.results)
+        file_events += t.results
         #file_events += t.result
 
     
@@ -77,12 +77,12 @@ for filename, lines in logs.items():
     mtime = lib.normalize_datetime(os.path.getmtime(filename))
     #log.info('  mtime:', mtime)
     try: # as timestamp might be None
-        if file_events and mtime < file_events['time'][-1].timestamp:
+        if file_events and mtime < file_events[-1].timestamp:
             if Message.debug_parsing:
                 log.info('  Using mtime (%s) to fix dates.' % str(mtime))
             last_event_timestamp = mtime
             
-            for event in file_events['time'][::-1]:
+            for event in file_events[::-1]:
                 #print('fixing timestamp', event.timestamp)
                 #print('fixing timestamp', event.message)
                 event.timestamp = event.timestamp.replace(year=last_event_timestamp.year)
@@ -95,20 +95,20 @@ for filename, lines in logs.items():
     except:
         log.err('  Year fix failed.')
         #traceback.print_exc()
-    lib.merge_dicts(events, file_events)
+    events += file_events
         
-events['time'] = sorted(events['time'], key=lambda x: (x.timestamp 
+events = sorted(events, key=lambda x: (x.timestamp 
                                        if x.timestamp 
                                        else lib.normalize_datetime()))
 #'''
 # write into DB
 lib.db = DB('/tmp/warlock.db')
-by_db_id = OrderedDict()
-for event in events['time']:
+events_by_db_id = OrderedDict()
+for event in events:
     if event and event.timestamp:
         entry_id = lib.db.insert_message(event)
         event.db_id = entry_id
-        by_db_id[entry_id] = event
+        events_by_db_id[entry_id] = event
 lib.db.commit()
 #'''
 
@@ -118,12 +118,12 @@ lib.db.commit()
 #    log.warn('No timed events loaded.')
 #    lib.exit_program(None, None)
 
-start = events['time'][0].timestamp
-end = events['time'][-1].timestamp
-log.info('Found %d events from %s to %s.' % (len(events['time']), start, end))
+start = events[0].timestamp
+end = events[-1].timestamp
+log.info('Found %d events from %s to %s.' % (len(events), start, end))
 
 
-events_limited = events['time']
+events_by_db_id_limited = events_by_db_id
 """
 deal with commands
 """
@@ -155,19 +155,17 @@ while True:
     elif cmd.startswith('start '):
         value = cmd[6:]
         if value == 'reset':
-            given = events['time'][0].timestamp
+            given = events[0].timestamp
         else:
             given = lib.normalize_datetime(value, silent=True)
             if not given:
                 display_filter = Filter.parse(value)
-                filtered = [e for e in events['time']
-                            if not display_filter or display_filter.test(e)]
-                if filtered:
-                    given = filtered[0].timestamp
+                matches = display_filter.run()
+                given = events_by_db_id.items()[matches[0] if matches else 0][1].timestamp
         if given:
             start = given
             log.info('Working with events from %s to %s.' % (start, end))
-            events_limited = [e for e in events['time'] if start <= e.timestamp <= end]
+            events_by_db_id_limited = OrderedDict([(db_id, e) for db_id, e in events_by_db_id.items() if start <= e.timestamp <= end])
         else:
             log.err('Usage: start <datetime>|reset|<filter>')
 
@@ -175,19 +173,17 @@ while True:
     elif cmd.startswith('end '):
         value = cmd[4:]
         if value == 'reset':
-            given = events['time'][-1].timestamp
+            given = events[-1].timestamp
         else:
             given = lib.normalize_datetime(value, silent=True)
             if not given:
                 display_filter = Filter.parse(value)
-                filtered = [e for e in events['time']
-                            if not display_filter or display_filter.test(e)]
-                if filtered:
-                    given = filtered[-1].timestamp
+                matches = display_filter.run()
+                given = events_by_db_id.items()[matches[-1] if matches else -1][1].timestamp
         if given:
             end = given
             log.info('Working with events from %s to %s.' % (start, end))
-            events_limited = [e for e in events['time'] if start <= e.timestamp <= end]
+            events_by_db_id_limited = OrderedDict([(db_id, e) for db_id, e in events_by_db_id.items() if start <= e.timestamp <= end])
         else:
             log.err('Usage: end <datetime>|reset|<filter>')
 
@@ -197,14 +193,14 @@ while True:
         list detailed events based on optional display filter
         """
         log.info('Showing events from %s to %s.' % (start, end))
-        list_events(by_db_id, cmd[12:])
+        list_events(events_by_db_id_limited, cmd[12:])
 
-    # list suspicious
+    # list suspicious # TODO refactor
     elif cmd.startswith('suspicious'):
         try:
             log.info('Showing suspicious for events from %s to %s.' % (start, end))
 
-            list_suspicious(events_limited, cmd.split()[1], ' '.join(cmd.split()[2:]))
+            list_suspicious(events_by_db_id_limited, cmd.split()[1], ' '.join(cmd.split()[2:]))
         except:
             traceback.print_exc()
             log.err('Usage: suspicious ip|user [<filter>]')
@@ -214,7 +210,7 @@ while True:
         try:
             log.info('Showing counts for events from %s to %s.' % (start, end))
 
-            list_overview(by_db_id, cmd.split()[1], ' '.join(cmd.split()[2:]))
+            list_overview(events_by_db_id_limited, cmd.split()[1], ' '.join(cmd.split()[2:]))
 
         except:
             traceback.print_exc()
@@ -222,8 +218,23 @@ while True:
    
     # plot
     elif cmd.startswith('plot'):
-        plot(events_limited, cmd[4:])
+        plot(events_by_db_id_limited, cmd[4:])
 
+    # export into file
+    elif cmd.startswith('export '):
+        parts = cmd.split()
+
+        display_filter = Filter.parse(' '.join(parts[2:]))
+        matches = display_filter.run() if display_filter else events_by_db_id_limited.keys()
+        if matches:
+            try:
+                with open(parts[1], 'w') as f:
+                    for db_id in matches:
+                        f.write(str(events_by_db_id_limited[db_id]))
+                        f.write('\n')
+            except:
+                traceback.print_exc()
+                log.err('Cannot export log entries!')
     else:
         log.warn('Unknown command.')
 

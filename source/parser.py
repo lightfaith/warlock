@@ -88,6 +88,7 @@ CREATE INDEX attr_index ON EA(value);
         self.conn.commit()
 
     def query(self, command, parameters=None, commit=True):
+        #print(command, parameters)
         if not command.strip():
             return []
         try:
@@ -159,46 +160,14 @@ class MessageParserThread(Thread):
         Thread.__init__(self)
         self.filename = filename
         self.lines = lines
-        self.results = {
-            'time': [],
-            'source': {},
-            'category': {},
-            'score': {},
-            'severity': {},
-        }
-        #print(self, '%d lines' % len(lines))
+        self.results = []
 
     def run(self):
         for line in self.lines:
             m = Message.parse(self.filename, line)
             if not m:
                 continue
-            # save all (sorted by time)
-            self.results['time'].append(m)
-            # by source
-            if not m.source in self.results['source'].keys():
-                self.results['source'][m.source] = []
-            self.results['source'][m.source].append(m)
-            # by category
-            if not m.category in self.results['category'].keys():
-                self.results['category'][m.category] = []
-            self.results['category'][m.category].append(m)
-            # by score
-            if not m.score in self.results['score'].keys():
-                self.results['score'][m.score] = []
-            self.results['score'][m.score].append(m)
-            # by severity
-            if not m.severity in self.results['severity'].keys():
-                self.results['severity'][m.severity] = []
-            self.results['severity'][m.severity].append(m)
-            # attributes
-            for k, v in m.attributes.items():
-                if not k in self.results.keys():
-                    self.results[k] = {}
-                if not v in self.results[k].keys():
-                    self.results[k][v] = []
-                self.results[k][v].append(m)
-        #print(self, 'done.')
+            self.results.append(m)
 
 
 
@@ -354,7 +323,7 @@ class Message:
     
     
     #################################################
-    def __str__(self):
+    def fancy_print(self):
         message_padded = '\n'.join(['    \u2502%-*s\u2502' 
                                     % (Message.print_len, x) 
                                     for x in [self.message[i:i+Message.print_len] 
@@ -362,7 +331,7 @@ class Message:
                                                              len(self.message), 
                                                              Message.print_len)]])
 
-        return '%s%s < %d > %s (from %s): \n%s\n%s\n%s\n    attr: %s%s' % (
+        print('%s%s < %d > %s (from %s): \n%s\n%s\n%s\n    attr: %s%s' % (
             lib.severity_colors[self.severity],
             lib.normalize_datetime(self.timestamp),
             #self.timestamp,
@@ -373,7 +342,10 @@ class Message:
             message_padded,
             '    \u2514' + '\u2500' * Message.print_len + '\u2518',
             self.attributes,
-            log.COLOR_NONE)
+            log.COLOR_NONE))
+
+    def __str__(self):
+        return self.message + ' (from %s)' % self.source
 
     ######################################################################
     @staticmethod

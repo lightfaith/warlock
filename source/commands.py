@@ -36,7 +36,7 @@ def list_events(events, display_filter_str):
     for db_id in matches:
         event = events[db_id]
         #if (not display_filter) or display_filter.test(event):
-        print(event)
+        event.fancy_print()
         i += 1
         if count and i >= count:
             break
@@ -147,10 +147,9 @@ def plot(events, display_filter_str):
 
     severities = ('UNKNOWN', 'none', 'info', 'notice', 'warning', 'critical')
 
-    to_show = [event for event in events 
-               if not display_filter or display_filter.test(event)]
-    if to_show:
-        log.info('Will plot %d events.' % len(to_show))
+    matches = display_filter.run() if display_filter else events.keys()
+    if matches:
+        log.info('Will plot %d events.' % len(matches))
     else:
         log.warn('No events match criteria.')
         return
@@ -161,7 +160,8 @@ def plot(events, display_filter_str):
     fig, ax = plt.subplots(1, 1, figsize=(8, 20))
     plt.xticks(rotation=30)
     by_severity = OrderedDict([(s, []) for s in severities])
-    for event in to_show:
+    for db_id in matches:
+        event = events[db_id]
         by_severity[event.severity].append(event.timestamp)
 
     ax.hist([mdates.date2num(by_severity[s]) for s in severities], 
@@ -190,18 +190,18 @@ def venn(events, *filters):
 class Filter:
     debug_filter = False
     operators = {
-        '==': (0.5, lambda x, y: x == y),
-        '!=': (0.5, lambda x, y: x != y),
-        '<': (0.5, lambda x, y: x < y),
-        '<=': (0.5, lambda x, y: x <= y),
-        '>': (0.5, lambda x, y: x > y),
-        '>=': (0.5, lambda x, y: x >= y),
-        'and': (0.2, lambda x, y: x and y),
-        'or': (0.1, lambda x, y: x or y),
-        'not': (0.3, lambda x: not x),
-        'contains': (0.5, lambda x, y: str(y) in x),
-        'matches': (0.5, lambda x, y: re.search(str(y), x)),
-        'suspicious': (0.5, lambda x: x in [k for _,v in Message.suspicious.items() for k in v.keys()]),
+        '==': 0.5,
+        '!=': 0.5,
+        '<': 0.5,
+        '<=': 0.5,
+        '>': 0.5,
+        '>=': 0.5,
+        'and': 0.2,
+        'or': 0.1,
+        'not': 0.3,
+        'contains': 0.5,
+        'matches': 0.5,
+        'suspicious': 0.5,
         #'multior':, # TODO
     }
     
@@ -210,55 +210,7 @@ class Filter:
         self.level = level
         self.x1 = x1
         self.x2 = x2
-    '''
-    def test(self, event, inner=False):
-        """
-        recursive testing if given event matches the filter
-        """
-        if self.x2: # binary operator
-            return Filter.operators[self.value][1](
-                self.x1.test(event, inner=True), 
-                self.x2.test(event, inner=True))
-        elif self.x1: # unary operator
-            return Filter.operators[self.value][1](
-                self.x1.test(event, inner=True)
-                ) # TODO multior won't be bool...
-        else: # term
-            if re.match('^(".*"|\'.*\')$', self.value): # string
-                return self.value[1:-1]
-            try: # int
-                return int(self.value)
-            except:
-                pass
-            try: # float
-                return float(self.value)
-            except:
-                pass
-            as_date = lib.normalize_datetime(self.value, silent=True)
-            if as_date:
-                return as_date
-            # dynamic
-            dynamic = {
-                'time': event.timestamp,
-                'timestamp': event.timestamp,
-                'score': event.score,
-                'severity': event.severity,
-                'source': event.source,
-                'category': event.category,
-                'message': event.message,
-            }
-            for k, v in dynamic.items():
-                if self.value == k:
-                    return v
-            for k, v in event.attributes.items(): # as event attribute
-                if self.value == k:
-                    return v
-            # default: string if not the top node
-            if inner:
-                return self.value
-            else:
-                return None
-    '''
+
     queries = {
         'timestamp': ("SELECT entry_id FROM Entry WHERE timestamp {} ?"),
         'source': ("SELECT E.entry_id "
@@ -283,31 +235,36 @@ class Filter:
         # comparison? return ids from select
         print(self.x1, self.value, self.x2)
         #pdb.set_trace()
-        if self.value in ('==', '!=', '<', '<=', '>', '>=', 'contains', 'matches'):
-            to_replace = ('?', '?')
-            operator = self.value
-            # contains and matches are slightly different
-            if self.value == 'contains':
-                to_replace = ('?', "'%' || ? || '%'")
-                operator = 'LIKE'
-            if self.value == 'matches':
-                operator = 'REGEXP'
+        try:
+            if self.value in ('==', '!=', '<', '<=', '>', '>=', 'contains', 'matches'):
+                to_replace = ('?', '?')
+                operator = self.value
+                # contains and matches are slightly different
+                if self.value == 'contains':
+                    to_replace = ('?', "'%' || ? || '%'")
+                    operator = 'LIKE'
+                if self.value == 'matches':
+                    operator = 'REGEXP'
 
-            if self.x1.value in ('timestamp', 'source', 'category', 'score', 'severity'):
-                # run non-attribute queries
-                return [x[0] for x in lib.db.query(lib.rreplace(Filter.queries[self.x1.value].format(operator), *to_replace, 1), (self.x2.value,))]
-            else:
-                # attribute query
-                return [x[0] for x in lib.db.query(lib.rreplace(Filter.queries['attribute'].format(operator), *to_replace, 1), (self.x1.value, self.x2.value))]
+                if self.x1.value in ('timestamp', 'source', 'category', 'score', 'severity', 'message'):
+                    # run non-attribute queries
+                    return [x[0] for x in lib.db.query(lib.rreplace(Filter.queries[self.x1.value].format(operator), *to_replace, 1), (self.x2.value,))]
+                else:
+                    # attribute query
+                    return [x[0] for x in lib.db.query(lib.rreplace(Filter.queries['attribute'].format(operator), *to_replace, 1), (self.x1.value, self.x2.value))]
 
-        # suspicious? # TODO add table, return ids from select
-        # boolean? return intersection/union of ids
-        elif self.value == 'or':
-            return list(set(self.x1.run() + self.x2.run()))
-        elif self.value == 'and':
-            return [x for x in self.x1.run() if x in self.x2.run()]
-        elif self.value == 'not':
-            return [x[0] for x in lib.db.query("SELECT entry_id FROM entry") if x[0] not in self.x1.run()]
+            # suspicious? # TODO add table, return ids from select
+            # boolean? return intersection/union of ids
+            elif self.value == 'or':
+                return list(set(self.x1.run() + self.x2.run()))
+            elif self.value == 'and':
+                return [x for x in self.x1.run() if x in self.x2.run()]
+            elif self.value == 'not':
+                return [x[0] for x in lib.db.query("SELECT entry_id FROM entry") if x[0] not in self.x1.run()]
+        except:
+            traceback.print_exc()
+            log.err('Invalid filter.')
+            return []
             
         
             
@@ -366,7 +323,7 @@ class Filter:
                 bracket_count -= 1
                 levels.append(-1)
             else:
-                level = bracket_count + (Filter.operators.get(part) or [0.9])[0] 
+                level = bracket_count + (Filter.operators.get(part) or 0.9)
                 unique_levels.add(level)
                 levels.append(level)
         
