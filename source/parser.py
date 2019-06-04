@@ -7,18 +7,197 @@ from source import lib
 from source import log
 from threading import Thread
 import pdb
+import sqlite3
+import traceback
+
+class DB:
+    def __init__(self, path):
+        self.path = path
+        self.uniques = {
+            'source': {},
+            'category': {},
+            'attribute': {},
+        }
+        self.lasts = {
+            'source' : 0,
+            'category': 0,
+            'attribute': 0,
+            'entry': 0,
+        }
+        self.schema = (
+"""
+CREATE TABLE Source
+(
+	source_id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+	path VARCHAR(256) NOT NULL UNIQUE
+);
+
+CREATE TABLE Category
+(
+	category_id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+	name VARCHAR(50) NOT NULL UNIQUE
+);
+
+CREATE TABLE Entry
+(
+	entry_id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+	timestamp DATETIME NOT NULL,
+	source_id INTEGER NOT NULL,
+	category_id INTEGER NOT NULL,
+	score INTEGER NOT NULL,
+	severity VARCHAR(10) NOT NULL,
+	message VARCHAR(16384) NOT NULL, 
+	FOREIGN KEY(source_id) REFERENCES Source(source_id) ON DELETE CASCADE,
+	FOREIGN KEY(category_id) REFERENCES Category(category_id) ON DELETE CASCADE
+);
+
+
+CREATE TABLE Attribute
+(
+	attribute_id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+	name VARCHAR(50) NOT NULL UNIQUE
+);
+
+CREATE TABLE EA
+(
+	entry_id INTEGER NOT NULL,
+	attribute_id INTEGER NOT NULL,
+	value VARCHAR(256) NOT NULL,
+	PRIMARY KEY(entry_id, attribute_id),
+	FOREIGN KEY(entry_id) REFERENCES Entry(entry_id) ON DELETE CASCADE,
+	FOREIGN KEY(attribute_id) REFERENCES Attribute(attribute_id) ON DELETE CASCADE
+);
+
+CREATE INDEX timestamp_index ON Entry(timestamp);
+CREATE INDEX score_index ON Entry(score);
+CREATE INDEX severity_index ON Entry(severity);
+CREATE INDEX attr_index ON EA(value);
+"""
+        )
+        self.conn = sqlite3.connect(self.path)
+        self.cur = self.conn.cursor()
+        # create REGEXP function
+        self.conn.create_function("REGEXP", 2, lambda x, y: re.search(x, y) is not None)
+        # create schema
+        self.query("PRAGMA foreign_keys=ON")
+        for table in self.schema.split(';'):
+            self.query(table)
+    
+
+    def commit(self):
+        self.conn.commit()
+
+    def query(self, command, parameters=None, commit=True):
+        if not command.strip():
+            return []
+        try:
+            self.cur.execute(command, parameters or tuple())
+        except:
+            traceback.print_exc()
+            print('QUERY:')
+            print(command)
+            print(parameters)
+        if commit:
+            self.commit()
+        if command.upper().startswith('SELECT '):
+            return self.cur.fetchall()
+        return []
+
+    def insert_message(self, message):
+        # create source if necessary
+        if message.source not in self.uniques['source'].keys():
+            self.query("INSERT INTO Source(path) VALUES(?)", (message.source,), commit=False)
+            self.lasts['source'] += 1
+            source_id = self.lasts['source']
+            self.uniques['source'][message.source] = source_id
+        else:
+            source_id = self.uniques['source'][message.source]
+        # create category if necessary
+        if message.category not in self.uniques['category'].keys():
+            self.query("INSERT INTO Category(name) VALUES(?)", (message.category,), commit=False)
+            self.lasts['category'] += 1
+            category_id = self.lasts['category']
+            self.uniques['category'][message.category] = category_id
+        else:
+            category_id = self.uniques['category'][message.category]
+        
+        # create entry
+        self.query("INSERT INTO Entry(timestamp, source_id, category_id, score, "
+                   "                  severity, message) "
+                   "VALUES (?, ?, ?, ?, ?, ?)", 
+                   (message.timestamp,
+                    source_id,
+                    category_id,
+                    message.score,
+                    message.severity,
+                    message.message
+                   ), commit=False)
+        self.lasts['entry'] += 1
+        entry_id = self.lasts['entry']
+
+        # add entry-attributes for entry
+        for attribute, value in message.attributes.items():
+            # add attribute if necessary
+            if attribute not in self.uniques['attribute'].keys():
+                self.query("INSERT INTO Attribute(name) VALUES(?)", (attribute,), commit=False)
+                self.lasts['attribute'] += 1
+                attribute_id = self.lasts['attribute']
+                self.uniques['attribute'][attribute] = attribute_id
+            else:
+                attribute_id = self.uniques['attribute'][attribute]
+            self.query("INSERT INTO EA(entry_id, attribute_id, value) "
+                       "VALUES(?, ?, ?)",
+                       (entry_id,
+                        attribute_id,
+                        value), commit=False)
+        return entry_id
+    ##########
+        
 
 class MessageParserThread(Thread):
     def __init__(self, filename, lines):
         Thread.__init__(self)
         self.filename = filename
         self.lines = lines
-        self.result = []
+        self.results = {
+            'time': [],
+            'source': {},
+            'category': {},
+            'score': {},
+            'severity': {},
+        }
         #print(self, '%d lines' % len(lines))
 
     def run(self):
         for line in self.lines:
-            self.result.append(Message.parse(self.filename, line))
+            m = Message.parse(self.filename, line)
+            if not m:
+                continue
+            # save all (sorted by time)
+            self.results['time'].append(m)
+            # by source
+            if not m.source in self.results['source'].keys():
+                self.results['source'][m.source] = []
+            self.results['source'][m.source].append(m)
+            # by category
+            if not m.category in self.results['category'].keys():
+                self.results['category'][m.category] = []
+            self.results['category'][m.category].append(m)
+            # by score
+            if not m.score in self.results['score'].keys():
+                self.results['score'][m.score] = []
+            self.results['score'][m.score].append(m)
+            # by severity
+            if not m.severity in self.results['severity'].keys():
+                self.results['severity'][m.severity] = []
+            self.results['severity'][m.severity].append(m)
+            # attributes
+            for k, v in m.attributes.items():
+                if not k in self.results.keys():
+                    self.results[k] = {}
+                if not v in self.results[k].keys():
+                    self.results[k][v] = []
+                self.results[k][v].append(m)
         #print(self, 'done.')
 
 
@@ -42,7 +221,10 @@ class Message:
                                   # extracted into time and attributes
         self.attributes = {}      # dict of interesting data (e.g. IP, username)
                                   # from self.parsed
+        self.db_id = 0            # ID of entry in DB, will be corrected
+                                  # after DB insert
         self.analyze()
+
 
     def analyze(self):
         for attribute, reformatter, keys in Message.attributes:

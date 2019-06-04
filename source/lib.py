@@ -5,10 +5,13 @@ General-purpose stuff is defined here.
 import re
 import signal
 import sys
+import pdb
+import traceback
 from source import log
 from dateutil.parser import parse as dateutil_parse
 from tzlocal import get_localzone
 from datetime import datetime
+from collections import OrderedDict
 
 def positive(x):
     if type(x) == str:
@@ -178,6 +181,24 @@ def hexdump(data):
     return result
 
 
+def merge_dicts(target, addition):
+    # recursive merge of dicts
+    #pdb.set_trace()
+    for ak, av in addition.items():
+        av_type = type(av)
+        # create empty if new
+        if av_type in (list, dict, OrderedDict):
+            if ak not in target.keys():
+                target[ak] = av_type()
+            # append if list, recurse if dict
+            if av_type == list:
+                target[ak] += list(filter(None, av))
+            else:
+                merge_dicts(target[ak], av)
+        else:
+            target[ak] = av
+
+
 def run_command(command):
     """
     Run command in shell.
@@ -224,6 +245,10 @@ def diff_lines(lines_1, lines_2, form='D'):
                       if line.startswith(('-', '+'))]
     return lines	
 
+def rreplace(string, old, new, count=None):
+    return string[::-1].replace(old, new, count)[::-1]
+
+
 severity_colors = {
     'critical': log.COLOR_RED,
     'warning': log.COLOR_BROWN,
@@ -233,5 +258,6 @@ severity_colors = {
     'UNKNOWN': log.COLOR_DARK_GREY,
 }
 
+db = None # created in main file
 # --
 

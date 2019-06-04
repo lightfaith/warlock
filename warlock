@@ -10,7 +10,7 @@ import traceback
 
 from source import lib
 from source import log
-from source.parser import MessageParserThread, Message
+from source.parser import DB, MessageParserThread, Message
 from source.commands import *
 
 try:
@@ -48,9 +48,9 @@ elif os.path.isdir(path):
 parse events
 """
 
-events = []
+events = {}
 for filename, lines in logs.items():
-    file_events = []
+    file_events = {}
     log.info(filename)
     # skip /var/log/messages (non-critical stuff there)
     #      /var/log/debug.log (non-critical stuff there)
@@ -68,20 +68,21 @@ for filename, lines in logs.items():
         t.start()
     for t in threads:
         t.join()
-        file_events += t.result
+        # add data
+        lib.merge_dicts(file_events, t.results)
+        #file_events += t.result
 
-    file_events = list(filter(None, file_events))
     
     # if file mtime < last event, reyear backwards
     mtime = lib.normalize_datetime(os.path.getmtime(filename))
     #log.info('  mtime:', mtime)
     try: # as timestamp might be None
-        if file_events and mtime < file_events[-1].timestamp:
+        if file_events and mtime < file_events['time'][-1].timestamp:
             if Message.debug_parsing:
                 log.info('  Using mtime (%s) to fix dates.' % str(mtime))
             last_event_timestamp = mtime
             
-            for event in file_events[::-1]:
+            for event in file_events['time'][::-1]:
                 #print('fixing timestamp', event.timestamp)
                 #print('fixing timestamp', event.message)
                 event.timestamp = event.timestamp.replace(year=last_event_timestamp.year)
@@ -93,25 +94,36 @@ for filename, lines in logs.items():
                 last_event_timestamp = event.timestamp
     except:
         log.err('  Year fix failed.')
-        traceback.print_exc()
-    events += file_events
+        #traceback.print_exc()
+    lib.merge_dicts(events, file_events)
         
-
-events = sorted(events, key=lambda x: (x.timestamp 
+events['time'] = sorted(events['time'], key=lambda x: (x.timestamp 
                                        if x.timestamp 
                                        else lib.normalize_datetime()))
+#'''
+# write into DB
+lib.db = DB('/tmp/warlock.db')
+by_db_id = OrderedDict()
+for event in events['time']:
+    if event and event.timestamp:
+        entry_id = lib.db.insert_message(event)
+        event.db_id = entry_id
+        by_db_id[entry_id] = event
+lib.db.commit()
+#'''
 
-timed_events = [e for e in events if e.category != 'UNKNOWN' and e.timestamp]
-if not timed_events:
-    log.warn('No timed events loaded.')
-    lib.exit_program(None, None)
+#timed_events = [e for e in events['time'] 
+#                if e.category != 'UNKNOWN' and e.timestamp]
+#if not timed_events:
+#    log.warn('No timed events loaded.')
+#    lib.exit_program(None, None)
 
-start = timed_events[0].timestamp
-end = timed_events[-1].timestamp
-log.info('Found %d events from %s to %s.' % (len(events), start, end))
+start = events['time'][0].timestamp
+end = events['time'][-1].timestamp
+log.info('Found %d events from %s to %s.' % (len(events['time']), start, end))
 
 
-events_limited = events
+events_limited = events['time']
 """
 deal with commands
 """
@@ -135,25 +147,27 @@ while True:
     # test
     if cmd.startswith('test'):
         #venn(events, 'category == auth', 'severity == critical')
-        pdb.set_trace()
+        list_overview(by_db_id, 'source', 'score >= 5')
+        
+        pass
 
-    # set stART
+    # set start
     elif cmd.startswith('start '):
         value = cmd[6:]
         if value == 'reset':
-            given = events[0].timestamp
+            given = events['time'][0].timestamp
         else:
             given = lib.normalize_datetime(value, silent=True)
             if not given:
                 display_filter = Filter.parse(value)
-                filtered = [e for e in events
+                filtered = [e for e in events['time']
                             if not display_filter or display_filter.test(e)]
                 if filtered:
                     given = filtered[0].timestamp
         if given:
             start = given
             log.info('Working with events from %s to %s.' % (start, end))
-            events_limited = [e for e in events if start <= e.timestamp <= end]
+            events_limited = [e for e in events['time'] if start <= e.timestamp <= end]
         else:
             log.err('Usage: start <datetime>|reset|<filter>')
 
@@ -161,19 +175,19 @@ while True:
     elif cmd.startswith('end '):
         value = cmd[4:]
         if value == 'reset':
-            given = events[-1].timestamp
+            given = events['time'][-1].timestamp
         else:
             given = lib.normalize_datetime(value, silent=True)
             if not given:
                 display_filter = Filter.parse(value)
-                filtered = [e for e in events 
+                filtered = [e for e in events['time']
                             if not display_filter or display_filter.test(e)]
                 if filtered:
                     given = filtered[-1].timestamp
         if given:
             end = given
             log.info('Working with events from %s to %s.' % (start, end))
-            events_limited = [e for e in events if start <= e.timestamp <= end]
+            events_limited = [e for e in events['time'] if start <= e.timestamp <= end]
         else:
             log.err('Usage: end <datetime>|reset|<filter>')
 
@@ -183,7 +197,7 @@ while True:
         list detailed events based on optional display filter
         """
         log.info('Showing events from %s to %s.' % (start, end))
-        list_events(events_limited, cmd[12:])
+        list_events(by_db_id, cmd[12:])
 
     # list suspicious
     elif cmd.startswith('suspicious'):
@@ -200,7 +214,7 @@ while True:
         try:
             log.info('Showing counts for events from %s to %s.' % (start, end))
 
-            list_overview(events_limited, cmd.split()[1], ' '.join(cmd.split()[2:]))
+            list_overview(by_db_id, cmd.split()[1], ' '.join(cmd.split()[2:]))
 
         except:
             traceback.print_exc()
