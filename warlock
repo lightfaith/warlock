@@ -7,6 +7,7 @@ import gnureadline
 import traceback
 #from datetime import datetime
 #from tzlocal import get_localzone
+from tempfile import NamedTemporaryFile
 
 from source import lib
 from source import log
@@ -102,7 +103,9 @@ events = sorted(events, key=lambda x: (x.timestamp
                                        else lib.normalize_datetime()))
 #'''
 # write into DB
-lib.db = DB('/tmp/warlock.db')
+f = NamedTemporaryFile()
+lib.db = DB(f.name)
+#lib.db = DB('/tmp/warlock.db')
 events_by_db_id = OrderedDict()
 for event in events:
     if event and event.timestamp:
@@ -221,16 +224,21 @@ while True:
         plot(events_by_db_id_limited, cmd[4:])
 
     # export into file
-    elif cmd.startswith('export '):
+    elif cmd.startswith(('export ', 'colorexport ')):
         parts = cmd.split()
 
         display_filter = Filter.parse(' '.join(parts[2:]))
         matches = display_filter.run() if display_filter else events_by_db_id_limited.keys()
+        colorize = ((lambda e: str(e))
+                    if parts[0] == 'export' 
+                    else (lambda e: '%s%s%s' % (lib.severity_colors[e.severity],
+                                                str(e),
+                                                log.COLOR_NONE)))
         if matches:
             try:
                 with open(parts[1], 'w') as f:
                     for db_id in matches:
-                        f.write(str(events_by_db_id_limited[db_id]))
+                        f.write(colorize(events_by_db_id_limited[db_id]))
                         f.write('\n')
             except:
                 traceback.print_exc()
