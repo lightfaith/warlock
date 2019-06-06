@@ -58,6 +58,8 @@ for filename, lines in logs.items():
     if any([
         re.search(r'messages(\.\d)?$', filename),
         re.search(r'debug(\.log)?(\.\d)?$', filename),
+        re.search(r'setuid\.(changes|today|yesterday)$', filename),
+        re.search(r'installer/syslog$', filename),
     ]):
         continue
     #thread_count = 4 if len(lines) > 1000 else 1 # slower...
@@ -87,15 +89,16 @@ for filename, lines in logs.items():
                 #print('fixing timestamp', event.timestamp)
                 #print('fixing timestamp', event.message)
                 event.timestamp = event.timestamp.replace(year=last_event_timestamp.year)
-                if event.timestamp > last_event_timestamp:
-                    #print(' decrementing year, cause actual', event.timestamp, '> last', last_event_timestamp)
-                    #print('  for', event.message)
+                # lower year; consider year change and time saving
+                if (event.timestamp - last_event_timestamp).total_seconds() > 3600:
+                    print(' decrementing year, cause actual', event.timestamp, '> last', last_event_timestamp)
+                    print('  for', event.message)
                     event.timestamp = event.timestamp.replace(year=last_event_timestamp.year - 1)
                 #print(' new timestamp:', event.timestamp)
                 last_event_timestamp = event.timestamp
     except:
         log.err('  Year fix failed.')
-        #traceback.print_exc()
+        traceback.print_exc()
     events += file_events
         
 events = sorted(events, key=lambda x: (x.timestamp 
@@ -198,7 +201,7 @@ while True:
         log.info('Showing events from %s to %s.' % (start, end))
         list_events(events_by_db_id_limited, cmd[12:])
 
-    # list suspicious # TODO refactor
+    # list suspicious
     elif cmd.startswith('suspicious'):
         try:
             log.info('Showing suspicious for events from %s to %s.' % (start, end))

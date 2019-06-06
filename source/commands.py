@@ -33,7 +33,7 @@ def list_events(events, display_filter_str):
     #print(count, display_filter)
     i = 0
     matches = display_filter.run() if display_filter else events.keys()
-    for db_id in matches:
+    for db_id in matches or []:
         event = events[db_id]
         #if (not display_filter) or display_filter.test(event):
         event.fancy_print()
@@ -74,7 +74,7 @@ def list_overview(events, what, display_filter_str):
     display_filter = Filter.parse(display_filter_str)
     matches = display_filter.run() if display_filter else events.keys()
 
-    for db_id in matches:
+    for db_id in matches or []:
         event = events[db_id]
 
         dynamic = {
@@ -160,7 +160,7 @@ def plot(events, display_filter_str):
     fig, ax = plt.subplots(1, 1, figsize=(8, 20))
     plt.xticks(rotation=30)
     by_severity = OrderedDict([(s, []) for s in severities])
-    for db_id in matches:
+    for db_id in matches or []:
         event = events[db_id]
         by_severity[event.severity].append(event.timestamp)
 
@@ -228,12 +228,16 @@ class Filter:
                       "FROM EA INNER JOIN Attribute A "
                       "        ON EA.attribute_id = A.attribute_id "
                       "WHERE A.name = ? AND EA.value {} ?"),
+        'suspicious': ("SELECT DISTINCT(EA.entry_id) "
+                       "FROM EA INNER JOIN Attribute A "
+                       "        ON EA.attribute_id = A.attribute_id "
+                       "WHERE A.name = ? AND EA.value IN (#)"),
 
 
     }
     def run(self):
         # comparison? return ids from select
-        print(self.x1, self.value, self.x2)
+        #print(self.x1, self.value, self.x2)
         #pdb.set_trace()
         try:
             if self.value in ('==', '!=', '<', '<=', '>', '>=', 'contains', 'matches'):
@@ -253,14 +257,28 @@ class Filter:
                     # attribute query
                     return [x[0] for x in lib.db.query(lib.rreplace(Filter.queries['attribute'].format(operator), *to_replace, 1), (self.x1.value, self.x2.value))]
 
-            # suspicious? # TODO add table, return ids from select
+            # suspicious? use WHERE IN query, return entry ids
+            if self.value == 'suspicious':
+                # get values
+                suspects = Message.suspicious.get(self.x1.value)
+                if not suspects:
+                    return []
+                # update placeholders in query, use suspects
+                return [x[0] for x in lib.db.query(Filter.queries['suspicious'].replace('#', ','.join('?' for _ in suspects)), (self.x1.value, *suspects))]
+                
             # boolean? return intersection/union of ids
             elif self.value == 'or':
-                return list(set(self.x1.run() + self.x2.run()))
+                x1_result = self.x1.run()
+                x2_result = self.x2.run()
+                return list(set(x1_result + x2_result))
             elif self.value == 'and':
-                return [x for x in self.x1.run() if x in self.x2.run()]
+                x1_result = set(self.x1.run())
+                x2_result = set(self.x2.run())
+                return [x for x in x1_result if x in x2_result]
             elif self.value == 'not':
-                return [x[0] for x in lib.db.query("SELECT entry_id FROM entry") if x[0] not in self.x1.run()]
+                x1_result = self.x1.run()
+                all_entries = [x[0] for x in lib.db.query("SELECT entry_id FROM entry")]
+                return list(set(all_entries) - set(x1_result))
         except:
             traceback.print_exc()
             log.err('Invalid filter.')
