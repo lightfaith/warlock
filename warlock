@@ -91,8 +91,8 @@ for filename, lines in logs.items():
                 event.timestamp = event.timestamp.replace(year=last_event_timestamp.year)
                 # lower year; consider year change and time saving
                 if (event.timestamp - last_event_timestamp).total_seconds() > 3600:
-                    print(' decrementing year, cause actual', event.timestamp, '> last', last_event_timestamp)
-                    print('  for', event.message)
+                    #print(' decrementing year, cause actual', event.timestamp, '> last', last_event_timestamp)
+                    #print('  for', event.message)
                     event.timestamp = event.timestamp.replace(year=last_event_timestamp.year - 1)
                 #print(' new timestamp:', event.timestamp)
                 last_event_timestamp = event.timestamp

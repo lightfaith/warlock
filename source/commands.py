@@ -27,8 +27,10 @@ def list_events(events, display_filter_str):
         display_filter = Filter.parse(display_filter_str[len(first_word):])
         count = int(first_word)
         #print('Set count:', count, 'filter is', display_filter)
-    if not display_filter:
+    #if not display_filter:
+    if not count:
         display_filter = Filter.parse(display_filter_str)
+        #print('Filter is', display_filter)
     
     #print(count, display_filter)
     i = 0
@@ -142,7 +144,7 @@ def list_overview(events, what, display_filter_str):
               '\u2502 %d' % sum(severity_totals))
         
 
-def plot(events, display_filter_str):
+def plot(events, display_filter_str): # TODO start, end
     display_filter = Filter.parse(display_filter_str)
 
     severities = ('UNKNOWN', 'none', 'info', 'notice', 'warning', 'critical')
@@ -172,7 +174,8 @@ def plot(events, display_filter_str):
     ax.xaxis.set_major_locator(locator)
     #ax.xaxis.set_major_locator(ticker.MultipleLocator(10))
     ax.xaxis.set_major_formatter(mdates.AutoDateFormatter(locator))
-    plt.legend()
+    handles, labels = ax.get_legend_handles_labels()
+    plt.legend(handles[::-1], labels[::-1])
     plt.show()
 
 
