@@ -174,7 +174,7 @@ class MessageParserThread(Thread):
 
 
 class Message:
-    debug_parsing = False
+    debug_parsing = False #or True
     suspicious = {}
 
     def __init__(self, source, category, message, grok_pattern, parsed):
@@ -297,10 +297,19 @@ class Message:
                 self.score = 4
         
         elif self.category == 'apache-access':
-            if 'other' in self.attributes.keys():
+            if 400 <= self.attributes['response'] < 500:
+                self.score = 5
+            elif 500 <= self.attributes['response']:
+                self.score = 6
+            if 'other' in self.attributes.keys(): # unknown data appended
                 self.score = 4
+            if (self.attributes['response'] == 200 # WP failed login
+                and self.attributes['method'] == 'POST'
+                and self.attributes['request'].endswith('/wp-login.php')):
+                self.score = 7
+                Message.mark_suspicious(self, '\'WordPress\' auth failed')
         elif self.category == 'apache-error':
-            if 'other' in self.attributes.keys():
+            if 'other' in self.attributes.keys(): # unknown data appended
                 self.score = 4
             if 'error reading the headers' in self.message:
                 self.score = 5
@@ -384,8 +393,9 @@ class Message:
                         log.warn('    which is \'UNKNOWN\' format.')
                 for k, v in add.items():
                     parsed[k] = v
-                #print(parsed)
-                #print()
+                if Message.debug_parsing:
+                    print(parsed)
+                    print()
                 """ return new Parser object """
                 return Message(source, 
                                category, 
@@ -414,6 +424,9 @@ class Message:
         ('service', lambda x: x, ('service',)),
         ('result', lambda x: x, ('result',)),
         ('other', lambda x: x, ('other',)),
+        ('method', lambda x: x, ('verb',)),
+        ('request', lambda x: x, ('request',)),
+        ('response', lambda x: int(x), ('response',)),
     ]
 
     # patterns
@@ -442,7 +455,7 @@ class Message:
         ('apache-error', 
          '^%{HTTPD_ERRORLOG} %{GREEDYDATA:other}$', 
          lambda source: ('www' in source 
-                         or re.search(r'error\.log(\.\d)?$', source)),
+                         or re.search(r'error(\.|_)log(\.\d)?$', source)),
          {}),
 
         # auth with SSH key or password
